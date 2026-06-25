@@ -9,7 +9,6 @@ public final class AppSettings {
     private static final String PREFS_NAME = "pjsk_settings";
     private static final String KEY_PREVIEW_ENABLED = "preview_enabled";
     private static final String KEY_NO_CLICK_MODE = "no_click_mode";
-    private static final String KEY_FAST_DETECT_MODE = "fast_detect_mode";
     private static final String KEY_ACTION_Y = "action_y";
     private static final String KEY_TOUCH_MAPPING_MODE = "touch_mapping_mode";
 
@@ -37,22 +36,6 @@ public final class AppSettings {
 
     public static void setNoClickMode(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_NO_CLICK_MODE, enabled).apply();
-    }
-
-    public static boolean isFastDetectMode(Context context) {
-        return prefs(context).getBoolean(KEY_FAST_DETECT_MODE, false);
-    }
-
-    public static void setFastDetectMode(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_FAST_DETECT_MODE, enabled).apply();
-    }
-
-    public static int getModelImageSize(Context context) {
-        return isFastDetectMode(context) ? Config.MODEL_FAST_IMAGE_SIZE : Config.MODEL_IMAGE_SIZE;
-    }
-
-    public static float getModelConfidence(Context context) {
-        return isFastDetectMode(context) ? Config.MODEL_FAST_CONFIDENCE : Config.MODEL_CONFIDENCE;
     }
 
     public static double getActionY(Context context) {

@@ -21,7 +21,7 @@ import android.view.WindowMetrics;
 import java.nio.ByteBuffer;
 
 public final class ScreenCaptureSource implements AutoCloseable {
-    private static final int CAPTURE_MAX_LONG_SIDE = 960;
+    private static final int CAPTURE_MAX_LONG_SIDE = 1280;
 
     public interface Listener {
         default boolean shouldCaptureFrame() {
@@ -78,7 +78,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
         };
         mediaProjection.registerCallback(projectionCallback, handler);
 
-        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3);
         imageReader.setOnImageAvailableListener(reader -> {
             Image image = reader.acquireLatestImage();
             if (image == null) {
