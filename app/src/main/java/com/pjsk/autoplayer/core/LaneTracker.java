@@ -1,5 +1,7 @@
 package com.pjsk.autoplayer.core;
 
+import android.util.Log;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -8,8 +10,10 @@ import java.util.List;
 import java.util.Set;
 
 public final class LaneTracker {
+    private static final String TAG = "PJSK-LaneTracker";
     private static final int NUM_SUB_LANES = 24;
     private static final int INIT_FRAMES = 2;
+    private static final long FLICK_BASE_LOG_INTERVAL_MS = 1000;
 
     private final List<NoteTrack> tracks = new ArrayList<>();
     private final List<PendingDetection> pending = new ArrayList<>();
@@ -24,6 +28,7 @@ public final class LaneTracker {
     private double globalVy;
     private double pxScale = 1.0;
     private Double lastTimestamp;
+    private long lastFlickBaseFallbackLogMs;
     public double frameDt = 1.0 / 60.0;
 
     public List<NoteTrack> update(List<Detection> detections, int width, int height, double timestamp) {
@@ -81,7 +86,9 @@ public final class LaneTracker {
                     anchorY = bestBase.y;
                     hasFlickBase = true;
                 } else {
-                    continue;
+                    anchorY = d.y2;
+                    hasFlickBase = true;
+                    logFlickBaseFallback();
                 }
             }
             processed.add(new ProcessedDetection(anchorX, anchorY, d.cls, d.confidence, hasFlickBase));
@@ -391,6 +398,14 @@ public final class LaneTracker {
 
     private double s(double value) {
         return value * pxScale;
+    }
+
+    private void logFlickBaseFallback() {
+        long now = System.currentTimeMillis();
+        if (now - lastFlickBaseFallbackLogMs >= FLICK_BASE_LOG_INTERVAL_MS) {
+            lastFlickBaseFallbackLogMs = now;
+            Log.i(TAG, "using flick box bottom as base");
+        }
     }
 
     private static final class LaneInfo {
