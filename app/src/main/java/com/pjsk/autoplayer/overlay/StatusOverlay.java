@@ -12,6 +12,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -28,8 +29,11 @@ public final class StatusOverlay {
     private WindowManager windowManager;
     private WindowManager.LayoutParams params;
     private LinearLayout rootView;
+    private LinearLayout contentView;
     private TextView statusView;
+    private Button collapseButton;
     private Button previewButton;
+    private boolean collapsed;
 
     private int startX;
     private int startY;
@@ -76,7 +80,9 @@ public final class StatusOverlay {
             } catch (IllegalArgumentException ignored) {
             }
             rootView = null;
+            contentView = null;
             statusView = null;
+            collapseButton = null;
             previewButton = null;
             params = null;
         });
@@ -116,7 +122,9 @@ public final class StatusOverlay {
         } catch (RuntimeException e) {
             Log.e(TAG, "failed to show overlay", e);
             rootView = null;
+            contentView = null;
             statusView = null;
+            collapseButton = null;
             previewButton = null;
             params = null;
         }
@@ -129,12 +137,35 @@ public final class StatusOverlay {
         root.setBackground(makeBackground());
         root.setOnTouchListener((view, event) -> handleDrag(event));
 
+        LinearLayout header = new LinearLayout(context);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
         TextView title = new TextView(context);
         title.setText("运行状态");
         title.setTextColor(Color.WHITE);
         title.setTextSize(14f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        root.addView(title);
+        header.addView(title, new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f));
+
+        collapseButton = new Button(context);
+        collapseButton.setText("折叠");
+        collapseButton.setAllCaps(false);
+        collapseButton.setMinHeight(0);
+        collapseButton.setMinimumHeight(0);
+        collapseButton.setPadding(dp(6), 0, dp(6), 0);
+        collapseButton.setOnClickListener(v -> setCollapsed(!collapsed));
+        header.addView(collapseButton, new LinearLayout.LayoutParams(dp(66), dp(32)));
+
+        root.addView(header, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        contentView = new LinearLayout(context);
+        contentView.setOrientation(LinearLayout.VERTICAL);
 
         statusView = new TextView(context);
         statusView.setText(statusText);
@@ -144,7 +175,7 @@ public final class StatusOverlay {
                 dp(220),
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         statusParams.setMargins(0, dp(4), 0, dp(8));
-        root.addView(statusView, statusParams);
+        contentView.addView(statusView, statusParams);
 
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -169,11 +200,37 @@ public final class StatusOverlay {
         stop.setOnClickListener(v -> onStopClick.run());
         row.addView(stop, new LinearLayout.LayoutParams(0, dp(38), 1f));
 
-        root.addView(row, new LinearLayout.LayoutParams(
+        contentView.addView(row, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        root.addView(contentView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         return root;
+    }
+
+    private void setCollapsed(boolean collapsed) {
+        this.collapsed = collapsed;
+        if (contentView != null) {
+            contentView.setVisibility(collapsed ? View.GONE : View.VISIBLE);
+        }
+        if (collapseButton != null) {
+            collapseButton.setText(collapsed ? "展开" : "折叠");
+        }
+        if (rootView != null) {
+            rootView.setPadding(
+                    collapsed ? dp(10) : dp(12),
+                    collapsed ? dp(6) : dp(10),
+                    collapsed ? dp(10) : dp(12),
+                    collapsed ? dp(6) : dp(10));
+        }
+        if (windowManager != null && rootView != null && params != null) {
+            try {
+                windowManager.updateViewLayout(rootView, params);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
     }
 
     private boolean handleDrag(MotionEvent event) {
