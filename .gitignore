@@ -1,0 +1,20 @@
+.gradle/
+build/
+local.properties
+
+app/build/
+.idea/
+*.iml
+
+# Generated packages and local diagnostics
+*.apk
+*.ap_
+*.aab
+screen_now*.png
+window.xml
+note-screen*.png
+note-after-tap.png
+
+# Native/Gradle intermediate files
+.cxx/
+captures/

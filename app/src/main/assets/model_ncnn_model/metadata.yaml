@@ -1,0 +1,22 @@
+description: Ultralytics model_640 model trained on /root/code/pjsk/dataset/dataset.yaml
+author: Ultralytics
+date: '2026-06-25T09:28:24.072985'
+version: 8.4.76
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: tap
+  1: hold
+  2: sweep
+  3: flick
+args:
+  batch: 1
+  half: false
+channels: 3
+end2end: false

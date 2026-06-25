@@ -1,0 +1,42 @@
+{
+  "description": "Example ADB flow for an authorized app or device workflow.",
+  "loop": 1,
+  "steps": [
+    {
+      "action": "note",
+      "message": "Edit package name, coordinates, and waits before running."
+    },
+    {
+      "action": "launch",
+      "package": "com.example.app"
+    },
+    {
+      "action": "wait",
+      "ms": 1000
+    },
+    {
+      "action": "tap",
+      "x": 540,
+      "y": 1600
+    },
+    {
+      "action": "wait",
+      "ms": 500
+    },
+    {
+      "action": "swipe",
+      "x1": 540,
+      "y1": 1600,
+      "x2": 540,
+      "y2": 800,
+      "durationMs": 350
+    },
+    {
+      "action": "back"
+    },
+    {
+      "action": "screenshot",
+      "path": "tools/adb/out/latest.png"
+    }
+  ]
+}
