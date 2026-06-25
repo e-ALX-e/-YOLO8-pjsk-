@@ -5,7 +5,9 @@ public final class Config {
     }
 
     public static final int MODEL_IMAGE_SIZE = 640;
+    public static final int MODEL_FAST_IMAGE_SIZE = 512;
     public static final float MODEL_CONFIDENCE = 0.60f;
+    public static final float MODEL_FAST_CONFIDENCE = 0.72f;
     public static final float NMS_IOU = 0.45f;
     public static final double REFERENCE_FRAME_WIDTH = 720.0;
 

@@ -32,6 +32,7 @@ public final class MainActivity extends Activity {
     private SeekBar calibrationSeekBar;
     private Switch previewSwitch;
     private Switch noClickSwitch;
+    private Switch fastModeSwitch;
     private boolean updatingCalibrationUi;
 
     @Override
@@ -113,6 +114,21 @@ public final class MainActivity extends Activity {
         noClickParams.setMargins(0, dp(6), 0, 0);
         root.addView(noClickSwitch, noClickParams);
 
+        fastModeSwitch = new Switch(this);
+        fastModeSwitch.setText("极速识别模式（512 输入，更高 FPS，需重新开始生效）");
+        fastModeSwitch.setTextSize(15f);
+        fastModeSwitch.setTextColor(Color.rgb(45, 52, 64));
+        fastModeSwitch.setChecked(AppSettings.isFastDetectMode(this));
+        fastModeSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            AppSettings.setFastDetectMode(this, isChecked);
+            statusView.setText(isChecked
+                    ? "状态：极速识别已开启，请停止后重新开始"
+                    : "状态：稳定识别已开启，请停止后重新开始");
+        });
+        LinearLayout.LayoutParams fastModeParams = matchWrap();
+        fastModeParams.setMargins(0, dp(6), 0, 0);
+        root.addView(fastModeSwitch, fastModeParams);
+
         addCalibrationControls(root);
         addTouchMappingControls(root);
 
@@ -155,6 +171,9 @@ public final class MainActivity extends Activity {
         }
         if (noClickSwitch != null) {
             noClickSwitch.setChecked(AppSettings.isNoClickMode(this));
+        }
+        if (fastModeSwitch != null) {
+            fastModeSwitch.setChecked(AppSettings.isFastDetectMode(this));
         }
         updateCalibrationUi();
         updateTouchMappingUi();

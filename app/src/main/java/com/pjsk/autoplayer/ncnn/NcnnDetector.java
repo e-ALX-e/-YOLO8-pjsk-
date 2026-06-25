@@ -7,6 +7,7 @@ import android.util.Log;
 
 import com.pjsk.autoplayer.core.Config;
 import com.pjsk.autoplayer.core.Detection;
+import com.pjsk.autoplayer.settings.AppSettings;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,9 +38,9 @@ public final class NcnnDetector {
             AssetManager assets = context.getAssets();
             nativeAvailable = nativeInit(
                     assets,
-                    Config.MODEL_CONFIDENCE,
+                    AppSettings.getModelConfidence(context),
                     Config.NMS_IOU,
-                    Config.MODEL_IMAGE_SIZE);
+                    AppSettings.getModelImageSize(context));
             status = nativeStatus();
         } catch (Throwable t) {
             nativeAvailable = false;
