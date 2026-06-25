@@ -93,23 +93,15 @@ public final class AutoPlayer {
                     continue;
                 }
 
-                double triggerY;
-                if (trk.cls == Detection.CLS_FLICK) {
-                    triggerY = actionY - s(Config.FLICK_TRIGGER_ADVANCE_PX);
-                } else {
-                    triggerY = actionY;
-                }
-
+                double triggerY = actionY;
                 double clickLineMargin = s(Config.CLICK_LINE_MARGIN);
+                boolean immediateFlick = trk.cls == Detection.CLS_FLICK;
                 boolean crossedLine = trk.prevY <= triggerY && triggerY <= trk.y
                         && Math.abs(trk.y - triggerY) <= clickLineMargin * 1.5;
                 boolean nearLine = triggerY - clickLineMargin <= trk.y
                         && trk.y <= triggerY + clickLineMargin;
-                boolean flickLateLine = trk.cls == Detection.CLS_FLICK
-                        && trk.y >= triggerY - clickLineMargin
-                        && trk.y <= actionY + s(Config.FLICK_LATE_TRIGGER_PX);
 
-                if (crossedLine || nearLine || flickLateLine) {
+                if (immediateFlick || crossedLine || nearLine) {
                     if (!clickEnabled) {
                         ns.state = NoteState.STATE_FINISHED;
                         continue;
@@ -168,8 +160,7 @@ public final class AutoPlayer {
                     continue;
                 }
 
-                boolean tailNearLine = trk.y >= actionY - s(Config.HOLD_TAIL_Y_MARGIN);
-                if (trk.cls == Detection.CLS_FLICK && tailNearLine) {
+                if (trk.cls == Detection.CLS_FLICK) {
                     if (ns.touchId >= 0) {
                         double clickX = clickXAtLine(trk, actionY);
                         int touchX = toDisplayX(clickX);
@@ -185,6 +176,7 @@ public final class AutoPlayer {
                     continue;
                 }
 
+                boolean tailNearLine = trk.y >= actionY - s(Config.HOLD_TAIL_Y_MARGIN);
                 if (trk.cls == Detection.CLS_TAP && tailNearLine) {
                     ns.tailSeconds += tracker.frameDt;
                 } else {
