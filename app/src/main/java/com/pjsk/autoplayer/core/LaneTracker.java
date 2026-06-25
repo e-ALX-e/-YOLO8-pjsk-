@@ -53,6 +53,7 @@ public final class LaneTracker {
         for (Detection d : detections) {
             double anchorX = d.x;
             double anchorY = d.y;
+            boolean hasFlickBase = d.cls != Detection.CLS_FLICK;
             if (d.cls == Detection.CLS_FLICK) {
                 BaseAnchor bestBase = null;
                 double minScore = Double.POSITIVE_INFINITY;
@@ -78,9 +79,12 @@ public final class LaneTracker {
                 if (bestBase != null) {
                     anchorX = bestBase.x;
                     anchorY = bestBase.y;
+                    hasFlickBase = true;
+                } else {
+                    continue;
                 }
             }
-            processed.add(new ProcessedDetection(anchorX, anchorY, d.cls, d.confidence));
+            processed.add(new ProcessedDetection(anchorX, anchorY, d.cls, d.confidence, hasFlickBase));
         }
 
         List<ProcessedDetection> flickAnchors = new ArrayList<>();
@@ -96,7 +100,8 @@ public final class LaneTracker {
                 if (pairedBase) {
                     boolean nearFlick = false;
                     for (ProcessedDetection flick : flickAnchors) {
-                        if (Math.abs(d.y - flick.y) <= s(Config.FLICK_BASE_Y_TOLERANCE)
+                        if (flick.hasFlickBase
+                                && Math.abs(d.y - flick.y) <= s(Config.FLICK_BASE_Y_TOLERANCE)
                                 && Math.abs(d.x - flick.x) <= s(Config.FLICK_BASE_X_TOLERANCE)) {
                             nearFlick = true;
                             break;
@@ -417,12 +422,14 @@ public final class LaneTracker {
         final double y;
         final int cls;
         final double confidence;
+        final boolean hasFlickBase;
 
-        ProcessedDetection(double x, double y, int cls, double confidence) {
+        ProcessedDetection(double x, double y, int cls, double confidence, boolean hasFlickBase) {
             this.x = x;
             this.y = y;
             this.cls = cls;
             this.confidence = confidence;
+            this.hasFlickBase = hasFlickBase;
         }
     }
 

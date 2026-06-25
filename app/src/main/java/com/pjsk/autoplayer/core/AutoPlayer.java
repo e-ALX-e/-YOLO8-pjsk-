@@ -95,13 +95,12 @@ public final class AutoPlayer {
 
                 double triggerY = actionY;
                 double clickLineMargin = s(Config.CLICK_LINE_MARGIN);
-                boolean immediateFlick = trk.cls == Detection.CLS_FLICK;
                 boolean crossedLine = trk.prevY <= triggerY && triggerY <= trk.y
                         && Math.abs(trk.y - triggerY) <= clickLineMargin * 1.5;
                 boolean nearLine = triggerY - clickLineMargin <= trk.y
                         && trk.y <= triggerY + clickLineMargin;
 
-                if (immediateFlick || crossedLine || nearLine) {
+                if (crossedLine || nearLine) {
                     if (!clickEnabled) {
                         ns.state = NoteState.STATE_FINISHED;
                         continue;
@@ -160,7 +159,10 @@ public final class AutoPlayer {
                     continue;
                 }
 
-                if (trk.cls == Detection.CLS_FLICK) {
+                boolean flickTailReady = trk.cls == Detection.CLS_FLICK
+                        && trk.y >= actionY - s(Config.CLICK_LINE_MARGIN)
+                        && trk.y <= actionY + s(Config.CLICK_LINE_MARGIN);
+                if (flickTailReady) {
                     if (ns.touchId >= 0) {
                         double clickX = clickXAtLine(trk, actionY);
                         int touchX = toDisplayX(clickX);
