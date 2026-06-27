@@ -195,6 +195,7 @@ public final class LaneTracker {
 
         for (NoteTrack trk : tracks) {
             if (!matchedIds.contains(trk.id)) {
+                predictMissingTrack(trk, timestamp);
                 trk.missed++;
                 trk.missedSeconds += frameDt;
             }
@@ -380,6 +381,25 @@ public final class LaneTracker {
             globalVy = sum / valid.size();
             globalVyInitialized = true;
         }
+    }
+
+    private void predictMissingTrack(NoteTrack trk, double timestamp) {
+        if (!trk.confirmed || trk.missedSeconds > Config.FLICK_MISSING_PREDICT_SECONDS) {
+            return;
+        }
+        if (trk.cls != Detection.CLS_FLICK) {
+            return;
+        }
+
+        double predictedX = trk.x + trk.vx * frameDt;
+        double velocityY = Math.abs(trk.vy) > 80.0
+                ? trk.vy
+                : (globalVyInitialized ? globalVy : 0.0);
+        if (Math.abs(velocityY) < 80.0) {
+            return;
+        }
+        double predictedY = trk.y + velocityY * frameDt;
+        trk.predict(predictedX, predictedY, timestamp);
     }
 
     private static double median(List<Double> values) {

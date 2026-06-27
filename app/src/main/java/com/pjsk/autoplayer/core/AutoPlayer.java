@@ -95,10 +95,13 @@ public final class AutoPlayer {
 
                 double triggerY = actionY;
                 double clickLineMargin = s(Config.CLICK_LINE_MARGIN);
+                double lateTriggerMargin = trk.cls == Detection.CLS_FLICK
+                        ? s(Config.FLICK_LATE_TRIGGER_PX)
+                        : clickLineMargin * 1.5;
                 boolean crossedLine = trk.prevY <= triggerY && triggerY <= trk.y
-                        && Math.abs(trk.y - triggerY) <= clickLineMargin * 1.5;
+                        && trk.y <= triggerY + lateTriggerMargin;
                 boolean nearLine = triggerY - clickLineMargin <= trk.y
-                        && trk.y <= triggerY + clickLineMargin;
+                        && trk.y <= triggerY + lateTriggerMargin;
 
                 if (crossedLine || nearLine) {
                     if (!clickEnabled) {

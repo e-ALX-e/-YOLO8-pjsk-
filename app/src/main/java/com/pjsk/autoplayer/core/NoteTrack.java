@@ -50,4 +50,12 @@ public final class NoteTrack {
         missedSeconds = 0.0;
         age++;
     }
+
+    void predict(double predictedX, double predictedY, double newTimestamp) {
+        prevX = x;
+        prevY = y;
+        x = predictedX;
+        y = predictedY;
+        timestamp = newTimestamp;
+    }
 }
