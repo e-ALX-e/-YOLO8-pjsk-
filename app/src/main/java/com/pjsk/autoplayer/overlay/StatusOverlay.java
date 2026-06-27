@@ -24,6 +24,7 @@ public final class StatusOverlay {
     private final Context context;
     private final Runnable onStopClick;
     private final Runnable onPreviewClick;
+    private final Runnable onNoClickClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private WindowManager windowManager;
@@ -33,6 +34,7 @@ public final class StatusOverlay {
     private TextView statusView;
     private Button collapseButton;
     private Button previewButton;
+    private Button noClickButton;
     private boolean collapsed;
 
     private int startX;
@@ -40,10 +42,15 @@ public final class StatusOverlay {
     private float downRawX;
     private float downRawY;
 
-    public StatusOverlay(Context context, Runnable onStopClick, Runnable onPreviewClick) {
+    public StatusOverlay(
+            Context context,
+            Runnable onStopClick,
+            Runnable onPreviewClick,
+            Runnable onNoClickClick) {
         this.context = context.getApplicationContext();
         this.onStopClick = onStopClick;
         this.onPreviewClick = onPreviewClick;
+        this.onNoClickClick = onNoClickClick;
     }
 
     public static boolean canDrawOverlays(Context context) {
@@ -70,6 +77,14 @@ public final class StatusOverlay {
         });
     }
 
+    public void setNoClickMode(boolean enabled) {
+        mainHandler.post(() -> {
+            if (noClickButton != null) {
+                noClickButton.setText(enabled ? "允许点击" : "不点击");
+            }
+        });
+    }
+
     public void dismiss() {
         mainHandler.post(() -> {
             if (windowManager == null || rootView == null) {
@@ -84,6 +99,7 @@ public final class StatusOverlay {
             statusView = null;
             collapseButton = null;
             previewButton = null;
+            noClickButton = null;
             params = null;
         });
     }
@@ -114,8 +130,8 @@ public final class StatusOverlay {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.START | Gravity.TOP;
-        params.x = dp(16);
-        params.y = dp(72);
+        params.x = 0;
+        params.y = 0;
 
         try {
             windowManager.addView(rootView, params);
@@ -126,6 +142,7 @@ public final class StatusOverlay {
             statusView = null;
             collapseButton = null;
             previewButton = null;
+            noClickButton = null;
             params = null;
         }
     }
@@ -190,6 +207,17 @@ public final class StatusOverlay {
         LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
         previewParams.setMargins(0, 0, dp(6), 0);
         row.addView(previewButton, previewParams);
+
+        noClickButton = new Button(context);
+        noClickButton.setText("不点击");
+        noClickButton.setAllCaps(false);
+        noClickButton.setMinHeight(0);
+        noClickButton.setMinimumHeight(0);
+        noClickButton.setPadding(dp(6), 0, dp(6), 0);
+        noClickButton.setOnClickListener(v -> onNoClickClick.run());
+        LinearLayout.LayoutParams noClickParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        noClickParams.setMargins(0, 0, dp(6), 0);
+        row.addView(noClickButton, noClickParams);
 
         Button stop = new Button(context);
         stop.setText("停止");

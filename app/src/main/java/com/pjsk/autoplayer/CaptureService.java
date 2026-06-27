@@ -44,8 +44,8 @@ public final class CaptureService extends Service {
     private static final String TAG = "PJSK-CaptureService";
     private static final String CHANNEL_ID = "pjsk_capture";
     private static final int NOTIFICATION_ID = 10;
-    private static final long OVERLAY_UPDATE_INTERVAL_MS = 350;
-    private static final long NOTIFICATION_UPDATE_INTERVAL_MS = 2000;
+    private static final long OVERLAY_UPDATE_INTERVAL_MS = 1000;
+    private static final long NOTIFICATION_UPDATE_INTERVAL_MS = 3000;
     private static final long FPS_WINDOW_MS = 1000;
     private static final long CLICK_RESUME_DELAY_MS = 5000;
 
@@ -149,7 +149,7 @@ public final class CaptureService extends Service {
         previousNoClickMode = AppSettings.isNoClickMode(this);
         clickResumeAtMs = 0L;
         showOverlay("启动中\n模型：" + detectorStatus);
-        setPreviewEnabled(true);
+        setPreviewEnabled(AppSettings.isPreviewEnabled(this));
 
         MediaProjectionManager manager =
                 (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
@@ -202,7 +202,9 @@ public final class CaptureService extends Service {
                 return;
             }
 
+            long detectStartMs = SystemClock.elapsedRealtime();
             List<Detection> detections = currentDetector.detect(frame.bitmap);
+            long detectMs = Math.max(0L, SystemClock.elapsedRealtime() - detectStartMs);
             double actionYBase = AppSettings.getActionY(this);
             currentAutoPlayer.setActionYBase(actionYBase);
             updateClickMode(currentAutoPlayer);
@@ -212,6 +214,25 @@ public final class CaptureService extends Service {
 
             recordProcessedFrame();
             detectorStatus = currentDetector.status();
+            long statusStartMs = SystemClock.elapsedRealtime();
+            updateRuntimeStatus(detectionCount);
+            long statusMs = Math.max(0L, SystemClock.elapsedRealtime() - statusStartMs);
+
+            long previewStartMs = SystemClock.elapsedRealtime();
+            updatePreview(frame, detections, inferenceMs, actionYBase);
+            long previewMs = Math.max(0L, SystemClock.elapsedRealtime() - previewStartMs);
+
+            long actionStartMs = SystemClock.elapsedRealtime();
+            currentAutoPlayer.onFrame(
+                    detections,
+                    frame.width,
+                    frame.height,
+                    frame.displayWidth,
+                    frame.displayHeight,
+                    frame.timestampSec);
+            long actionMs = Math.max(0L, SystemClock.elapsedRealtime() - actionStartMs);
+            long totalMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
+
             long now = SystemClock.elapsedRealtime();
             if (now - lastDiagnosticsLogMs >= 1000) {
                 lastDiagnosticsLogMs = now;
@@ -219,6 +240,12 @@ public final class CaptureService extends Service {
                         + " display=" + frame.displayWidth + "x" + frame.displayHeight
                         + " fps=" + String.format(Locale.US, "%.1f", currentFps)
                         + " infer=" + inferenceMs + "ms"
+                        + " stageMs=capture:" + frame.captureMs
+                        + ",detect:" + detectMs
+                        + ",status:" + statusMs
+                        + ",preview:" + previewMs
+                        + ",action:" + actionMs
+                        + ",total:" + totalMs
                         + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
                         + " detections=" + detectionCount
                         + " actions=" + totalActions.get()
@@ -232,15 +259,6 @@ public final class CaptureService extends Service {
                         + " detector=" + detectorStatus);
             }
 
-            updateRuntimeStatus(detectionCount);
-            updatePreview(frame, detections, inferenceMs, actionYBase);
-            currentAutoPlayer.onFrame(
-                    detections,
-                    frame.width,
-                    frame.height,
-                    frame.displayWidth,
-                    frame.displayHeight,
-                    frame.timestampSec);
         } catch (Throwable t) {
             Log.e(TAG, "process frame failed", t);
             updateVisibleStatus("处理异常：" + t.getClass().getSimpleName(), true);
@@ -346,6 +364,9 @@ public final class CaptureService extends Service {
         if (now - lastOverlayUpdateMs >= OVERLAY_UPDATE_INTERVAL_MS) {
             lastOverlayUpdateMs = now;
             updateVisibleStatus(formatStatus(detectionCount), false);
+            if (statusOverlay != null) {
+                statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
+            }
         }
 
         if (now - lastNotificationUpdateMs >= NOTIFICATION_UPDATE_INTERVAL_MS) {
@@ -440,10 +461,21 @@ public final class CaptureService extends Service {
             statusOverlay = new StatusOverlay(this, () -> {
                 stopEverything();
                 stopSelf();
-            }, () -> setPreviewEnabled(!AppSettings.isPreviewEnabled(this)));
+            }, () -> setPreviewEnabled(!AppSettings.isPreviewEnabled(this)),
+                    this::toggleNoClickMode);
         }
         statusOverlay.show(text);
         statusOverlay.setPreviewEnabled(AppSettings.isPreviewEnabled(this));
+        statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
+    }
+
+    private void toggleNoClickMode() {
+        boolean enabled = !AppSettings.isNoClickMode(this);
+        AppSettings.setNoClickMode(this, enabled);
+        if (statusOverlay != null) {
+            statusOverlay.setNoClickMode(enabled);
+        }
+        updateNotification(enabled ? "已开启不点击模式" : "5 秒后恢复点击");
     }
 
     private void setPreviewEnabled(boolean enabled) {

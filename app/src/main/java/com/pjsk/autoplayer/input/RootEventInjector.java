@@ -20,6 +20,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -49,6 +51,7 @@ public final class RootEventInjector implements TouchInjector {
     private final int displayH;
     private final int displayRotation;
     private final double pxScale;
+    private final ExecutorService inputWorker = Executors.newSingleThreadExecutor();
     private final ByteBuffer eventBuffer = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN);
 
     private Process shell;
@@ -59,6 +62,7 @@ public final class RootEventInjector implements TouchInjector {
     private int maxRawY;
     private int nextTrackingId = 1000;
     private boolean loggedFirstTouch;
+    private volatile boolean closed;
 
     public RootEventInjector(Context context) {
         this.context = context.getApplicationContext();
@@ -79,84 +83,83 @@ public final class RootEventInjector implements TouchInjector {
 
     @Override
     public void down(int x, int y, int touchId) {
-        try {
-            doDown(x, y, touchId);
-        } catch (IOException e) {
-            Log.e(TAG, "down failed", e);
-        }
+        enqueue("down", () -> doDown(x, y, touchId));
     }
 
     @Override
     public void move(int x, int y, int touchId) {
-        try {
-            doMove(x, y, touchId);
-        } catch (IOException e) {
-            Log.e(TAG, "move failed", e);
-        }
+        enqueue("move", () -> doMove(x, y, touchId));
     }
 
     @Override
     public void up(int touchId) {
-        try {
-            doUp(touchId);
-        } catch (IOException e) {
-            Log.e(TAG, "up failed", e);
-        }
+        enqueue("up", () -> doUp(touchId));
     }
 
     @Override
     public void flickBatch(List<TouchPoint> points) {
-        try {
-            for (TouchPoint point : points) {
-                doDown(point.x, point.y, point.touchId);
-            }
-            sleep(Config.FLICK_DOWN_SECONDS);
-            for (int step = 1; step <= Config.FLICK_STEPS; step++) {
-                double progress = step / (double) Config.FLICK_STEPS;
-                for (TouchPoint point : points) {
-                    int moveY = Math.max(0, (int) Math.round(point.y - scaledFlickDistance() * progress));
-                    doMove(point.x, moveY, point.touchId);
-                }
-                sleep(Config.FLICK_STEP_SECONDS);
-            }
-            for (TouchPoint point : points) {
-                int endY = Math.max(0, (int) Math.round(point.y - scaledFlickDistance()));
-                doMove(point.x, endY, point.touchId);
-                doUp(point.touchId);
-            }
-        } catch (IOException e) {
-            Log.e(TAG, "flick batch failed", e);
-        }
+        List<TouchPoint> copy = new ArrayList<>(points);
+        enqueue("flick batch", () -> doFlickBatch(copy));
     }
 
     @Override
     public void flickHeld(int x, int y, int touchId) {
-        try {
-            int startY = posY[touchId];
-            for (int step = 1; step <= Config.FLICK_STEPS; step++) {
-                double progress = step / (double) Config.FLICK_STEPS;
-                int moveY = Math.max(0, (int) Math.round(startY - scaledFlickDistance() * progress));
-                doMove(x, moveY, touchId);
-                sleep(Config.FLICK_STEP_SECONDS);
-            }
-            doUp(touchId);
-        } catch (IOException e) {
-            Log.e(TAG, "held flick failed", e);
-        }
+        enqueue("held flick", () -> doFlickHeld(x, y, touchId));
     }
 
     @Override
     public void shutdown() {
-        try {
-            if (shellInput != null) {
-                shellInput.flush();
-                shellInput.close();
+        closed = true;
+        inputWorker.shutdownNow();
+        closeShell();
+    }
+
+    private void enqueue(String name, InputTask task) {
+        if (closed) {
+            return;
+        }
+        inputWorker.execute(() -> {
+            try {
+                task.run();
+            } catch (IOException e) {
+                Log.e(TAG, name + " failed", e);
             }
-        } catch (IOException ignored) {
+        });
+    }
+
+    private interface InputTask {
+        void run() throws IOException;
+    }
+
+    private void doFlickBatch(List<TouchPoint> points) throws IOException {
+        for (TouchPoint point : points) {
+            doDown(point.x, point.y, point.touchId);
         }
-        if (shell != null) {
-            shell.destroy();
+        sleep(Config.FLICK_DOWN_SECONDS);
+        for (int step = 1; step <= Config.FLICK_STEPS; step++) {
+            double progress = step / (double) Config.FLICK_STEPS;
+            for (TouchPoint point : points) {
+                int moveY = Math.max(0, (int) Math.round(point.y - scaledFlickDistance() * progress));
+                doMove(point.x, moveY, point.touchId);
+            }
+            sleep(Config.FLICK_STEP_SECONDS);
         }
+        for (TouchPoint point : points) {
+            int endY = Math.max(0, (int) Math.round(point.y - scaledFlickDistance()));
+            doMove(point.x, endY, point.touchId);
+            doUp(point.touchId);
+        }
+    }
+
+    private void doFlickHeld(int x, int y, int touchId) throws IOException {
+        int startY = posY[touchId];
+        for (int step = 1; step <= Config.FLICK_STEPS; step++) {
+            double progress = step / (double) Config.FLICK_STEPS;
+            int moveY = Math.max(0, (int) Math.round(startY - scaledFlickDistance() * progress));
+            doMove(x, moveY, touchId);
+            sleep(Config.FLICK_STEP_SECONDS);
+        }
+        doUp(touchId);
     }
 
     private void doDown(int x, int y, int touchId) throws IOException {

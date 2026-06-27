@@ -21,7 +21,7 @@ import android.view.WindowMetrics;
 import java.nio.ByteBuffer;
 
 public final class ScreenCaptureSource implements AutoCloseable {
-    private static final int CAPTURE_MAX_LONG_SIDE = 1280;
+    private static final int CAPTURE_MAX_LONG_SIDE = 960;
 
     public interface Listener {
         default boolean shouldCaptureFrame() {
@@ -78,7 +78,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
         };
         mediaProjection.registerCallback(projectionCallback, handler);
 
-        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3);
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
         imageReader.setOnImageAvailableListener(reader -> {
             Image image = reader.acquireLatestImage();
             if (image == null) {
@@ -112,6 +112,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
     }
 
     private Frame toFrame(Image image) {
+        long startNs = System.nanoTime();
         Image.Plane plane = image.getPlanes()[0];
         ByteBuffer buffer = plane.getBuffer();
         buffer.rewind();
@@ -134,6 +135,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
         }
 
         double timestampSec = System.nanoTime() / 1_000_000_000.0;
+        long captureMs = Math.max(0L, (System.nanoTime() - startNs) / 1_000_000L);
         return new Frame(
                 bitmap,
                 width,
@@ -141,6 +143,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
                 displayWidth,
                 displayHeight,
                 timestampSec,
+                captureMs,
                 () -> releaseFrameBitmap(bitmap));
     }
 
@@ -270,6 +273,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
         public final int displayWidth;
         public final int displayHeight;
         public final double timestampSec;
+        public final long captureMs;
 
         private final Runnable onClose;
         private boolean closed;
@@ -281,6 +285,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
                 int displayWidth,
                 int displayHeight,
                 double timestampSec,
+                long captureMs,
                 Runnable onClose) {
             this.bitmap = bitmap;
             this.width = width;
@@ -288,6 +293,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
             this.displayWidth = displayWidth;
             this.displayHeight = displayHeight;
             this.timestampSec = timestampSec;
+            this.captureMs = captureMs;
             this.onClose = onClose;
         }
 

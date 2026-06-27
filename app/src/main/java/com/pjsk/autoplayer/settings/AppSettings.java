@@ -23,7 +23,7 @@ public final class AppSettings {
     }
 
     public static boolean isPreviewEnabled(Context context) {
-        return prefs(context).getBoolean(KEY_PREVIEW_ENABLED, true);
+        return prefs(context).getBoolean(KEY_PREVIEW_ENABLED, false);
     }
 
     public static void setPreviewEnabled(Context context, boolean enabled) {
