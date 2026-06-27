@@ -43,10 +43,11 @@ public final class Config {
     public static final double FLICK_HINT_SECONDS = 0.28;
     public static final double FLICK_HINT_X_MARGIN = 70.0;
     public static final double MIN_TAP_SECONDS = 0.026;
-    public static final int FLICK_DISTANCE = 135;
-    public static final int FLICK_STEPS = 2;
-    public static final double FLICK_DOWN_SECONDS = 0.002;
-    public static final double FLICK_STEP_SECONDS = 0.002;
+    public static final int FLICK_DISTANCE = 145;
+    public static final int FLICK_STEPS = 4;
+    public static final double FLICK_DOWN_SECONDS = 0.012;
+    public static final double FLICK_STEP_SECONDS = 0.008;
+    public static final double TOUCH_ID_RELEASE_DELAY_SECONDS = 0.060;
     public static final double FLICK_BASE_X_TOLERANCE = 36.0;
     public static final double FLICK_BASE_Y_TOLERANCE = 18.0;
     public static final double FLICK_BASE_LATE_X = 48.0;
