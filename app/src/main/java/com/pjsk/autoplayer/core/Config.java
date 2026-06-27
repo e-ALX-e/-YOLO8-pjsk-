@@ -40,6 +40,8 @@ public final class Config {
     public static final double FLICK_MAX_LOOKAHEAD_PX = 70.0;
     public static final double FLICK_LATE_TRIGGER_PX = 80.0;
     public static final double FLICK_MISSING_PREDICT_SECONDS = 0.08;
+    public static final double FLICK_HINT_SECONDS = 0.28;
+    public static final double FLICK_HINT_X_MARGIN = 70.0;
     public static final double MIN_TAP_SECONDS = 0.026;
     public static final int FLICK_DISTANCE = 135;
     public static final int FLICK_STEPS = 2;

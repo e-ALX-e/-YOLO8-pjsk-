@@ -23,11 +23,13 @@ public final class AutoPlayer {
     private final TouchInjector injector;
     private final ActionListener actionListener;
     private final Map<Integer, NoteState> noteStates = new HashMap<>();
+    private final Map<Integer, FlickHint> flickHints = new HashMap<>();
     private final List<Integer> availableTouchIds = new ArrayList<>();
     private double pxScale = 1.0;
     private double displayScaleX = 1.0;
     private double displayScaleY = 1.0;
     private double actionYBase = Config.ACTION_Y_DEFAULT;
+    private double currentTimestampSec;
     private boolean clickEnabled = true;
 
     public AutoPlayer(TouchInjector injector) {
@@ -52,6 +54,7 @@ public final class AutoPlayer {
         pxScale = Config.scaleForFrame(frameW);
         displayScaleX = displayW / (double) Math.max(1, frameW);
         displayScaleY = displayH / (double) Math.max(1, frameH);
+        currentTimestampSec = timestampSec;
         List<NoteTrack> confirmed = tracker.update(detections, frameW, frameH, timestampSec);
         processAutoAction(confirmed);
     }
@@ -74,6 +77,7 @@ public final class AutoPlayer {
         List<PendingRelease> pendingTapReleases = new ArrayList<>();
         List<TouchPoint> pendingFlicks = new ArrayList<>();
 
+        updateFlickHints(confirmedTracks, actionY);
         rebindHoldingStates(confirmedTracks);
         Set<Integer> activeIds = new HashSet<>();
         for (NoteTrack t : confirmedTracks) {
@@ -115,8 +119,19 @@ public final class AutoPlayer {
                         continue;
                     }
 
-                    if (trk.cls == Detection.CLS_FLICK) {
+                    FlickHint flickHint = trk.cls == Detection.CLS_FLICK
+                            ? null
+                            : consumeFlickHint(trk, actionY);
+                    boolean shouldFlick = trk.cls == Detection.CLS_FLICK || flickHint != null;
+
+                    if (shouldFlick) {
                         double clickX = clickXAtLine(trk, actionY);
+                        if (flickHint != null) {
+                            clickX = flickHint.xAtLine;
+                            Log.i(TAG, "flick hint used key=" + flickHint.key);
+                        } else {
+                            clearFlickHint(trk, actionY);
+                        }
                         int touchX = toDisplayX(clickX);
                         int touchY = toDisplayY(actionY);
                         Log.i(TAG, "flick x=" + touchX + " y=" + touchY
@@ -213,6 +228,64 @@ public final class AutoPlayer {
             for (TouchPoint point : pendingFlicks) {
                 releaseTouchId(point.touchId);
             }
+        }
+    }
+
+    private void updateFlickHints(List<NoteTrack> confirmedTracks, double actionY) {
+        List<Integer> expired = new ArrayList<>();
+        for (Map.Entry<Integer, FlickHint> entry : flickHints.entrySet()) {
+            if (currentTimestampSec - entry.getValue().timestampSec > Config.FLICK_HINT_SECONDS) {
+                expired.add(entry.getKey());
+            }
+        }
+        for (int key : expired) {
+            flickHints.remove(key);
+        }
+
+        for (NoteTrack trk : confirmedTracks) {
+            if (trk.cls != Detection.CLS_FLICK
+                    || trk.y < actionY - s(Config.FLICK_BASE_LATE_Y)
+                    || trk.y > actionY + s(Config.FLICK_LATE_TRIGGER_PX)) {
+                continue;
+            }
+            double xAtLine = clickXAtLine(trk, actionY);
+            int key = tracker.getKeyAt(xAtLine, actionY);
+            if (key < 0) {
+                continue;
+            }
+            flickHints.put(key, new FlickHint(key, xAtLine, currentTimestampSec));
+        }
+    }
+
+    private FlickHint consumeFlickHint(NoteTrack trk, double actionY) {
+        if (trk.cls == Detection.CLS_HOLD) {
+            return null;
+        }
+        double xAtLine = clickXAtLine(trk, actionY);
+        int key = tracker.getKeyAt(xAtLine, actionY);
+        if (key < 0) {
+            return null;
+        }
+        FlickHint hint = flickHints.get(key);
+        if (hint == null) {
+            return null;
+        }
+        if (currentTimestampSec - hint.timestampSec > Config.FLICK_HINT_SECONDS) {
+            flickHints.remove(key);
+            return null;
+        }
+        if (Math.abs(hint.xAtLine - xAtLine) > s(Config.FLICK_HINT_X_MARGIN)) {
+            return null;
+        }
+        flickHints.remove(key);
+        return hint;
+    }
+
+    private void clearFlickHint(NoteTrack trk, double actionY) {
+        double xAtLine = clickXAtLine(trk, actionY);
+        int key = tracker.getKeyAt(xAtLine, actionY);
+        if (key >= 0) {
+            flickHints.remove(key);
         }
     }
 
@@ -346,6 +419,7 @@ public final class AutoPlayer {
     }
 
     private void releaseAllActiveTouches() {
+        flickHints.clear();
         for (NoteState ns : noteStates.values()) {
             if (ns.touchId >= 0) {
                 Log.i(TAG, "no click mode release touchId=" + ns.touchId);
@@ -403,6 +477,18 @@ public final class AutoPlayer {
 
         NoteState(int trackId) {
             this.trackId = trackId;
+        }
+    }
+
+    private static final class FlickHint {
+        final int key;
+        final double xAtLine;
+        final double timestampSec;
+
+        FlickHint(int key, double xAtLine, double timestampSec) {
+            this.key = key;
+            this.xAtLine = xAtLine;
+            this.timestampSec = timestampSec;
         }
     }
 }
