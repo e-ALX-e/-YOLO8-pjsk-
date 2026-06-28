@@ -45,13 +45,13 @@ public final class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setPadding(dp(28), dp(30), dp(28), dp(24));
+        root.setPadding(dp(18), dp(22), dp(18), dp(20));
         root.setBackgroundColor(Color.rgb(247, 248, 250));
 
         TextView title = new TextView(this);
         title.setText("PJSK Native Auto");
         title.setTextColor(Color.rgb(20, 24, 32));
-        title.setTextSize(24f);
+        title.setTextSize(22f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
         root.addView(title, matchWrap());
@@ -59,10 +59,10 @@ public final class MainActivity extends Activity {
         statusView = new TextView(this);
         statusView.setText("状态：未启动");
         statusView.setTextColor(Color.rgb(45, 52, 64));
-        statusView.setTextSize(17f);
+        statusView.setTextSize(15f);
         statusView.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams statusParams = matchWrap();
-        statusParams.setMargins(0, dp(10), 0, dp(14));
+        statusParams.setMargins(0, dp(8), 0, dp(10));
         root.addView(statusView, statusParams);
 
         Button start = new Button(this);
@@ -95,7 +95,7 @@ public final class MainActivity extends Activity {
                     : "状态：识别预览已关闭");
         });
         LinearLayout.LayoutParams switchParams = matchWrap();
-        switchParams.setMargins(0, dp(10), 0, 0);
+        switchParams.setMargins(0, dp(8), 0, 0);
         root.addView(previewSwitch, switchParams);
 
         noClickSwitch = new Switch(this);
@@ -135,7 +135,7 @@ public final class MainActivity extends Activity {
         hint.setTextSize(14f);
         hint.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams hintParams = matchWrap();
-        hintParams.setMargins(0, dp(12), 0, 0);
+        hintParams.setMargins(0, dp(10), 0, 0);
         root.addView(hint, hintParams);
 
         ScrollView scrollView = new ScrollView(this);
@@ -211,7 +211,7 @@ public final class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams titleParams = matchWrap();
-        titleParams.setMargins(0, dp(14), 0, dp(2));
+        titleParams.setMargins(0, dp(12), 0, dp(2));
         root.addView(title, titleParams);
 
         calibrationValueView = new TextView(this);
@@ -307,7 +307,7 @@ public final class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams titleParams = matchWrap();
-        titleParams.setMargins(0, dp(14), 0, dp(2));
+        titleParams.setMargins(0, dp(12), 0, dp(2));
         root.addView(title, titleParams);
 
         touchMappingView = new TextView(this);
@@ -371,8 +371,8 @@ public final class MainActivity extends Activity {
     private LinearLayout.LayoutParams buttonParams() {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(50));
-        params.setMargins(0, dp(8), 0, 0);
+                dp(46));
+        params.setMargins(0, dp(7), 0, 0);
         return params;
     }
 
