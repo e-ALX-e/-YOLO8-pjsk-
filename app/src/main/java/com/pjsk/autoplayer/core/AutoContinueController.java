@@ -52,7 +52,13 @@ public final class AutoContinueController {
         long now = SystemClock.elapsedRealtime();
         switch (state) {
             case State.IDLE:
-                if (isLiveClear(frame)) {
+                if (isSelectSongVisible(frame)) {
+                    tapNormalized(SELECT_SONG_X, SELECT_SONG_Y, displayWidth, displayHeight);
+                    state = State.WAIT_SONG_PAGE;
+                    waitUntilMs = now + SELECT_TO_CONFIRM_DELAY_MS;
+                    lastTapMs = now;
+                    Log.i(TAG, "select song detected from idle");
+                } else if (isLiveClear(frame)) {
                     state = State.CLEAR_ADVANCING;
                     lastTapMs = 0L;
                     Log.i(TAG, "LIVE CLEAR detected");
@@ -105,12 +111,16 @@ public final class AutoContinueController {
     }
 
     private boolean isLiveClear(Bitmap frame) {
-        return whiteRatio(frame, 0.18, 0.30, 0.70, 0.58) > 0.16
-                && pinkRatio(frame, 0.75, 0.32, 0.86, 0.60) > 0.12;
+        return whiteRatio(frame, 0.16, 0.31, 0.72, 0.56) > 0.24
+                && darkRatio(frame, 0.16, 0.31, 0.72, 0.56) > 0.50
+                && whiteRatio(frame, 0.17, 0.34, 0.38, 0.54) > 0.25
+                && whiteRatio(frame, 0.39, 0.32, 0.58, 0.54) > 0.25
+                && whiteRatio(frame, 0.58, 0.32, 0.72, 0.54) > 0.25;
     }
 
     private boolean isSelectSongVisible(Bitmap frame) {
-        return whiteRatio(frame, 0.65, 0.89, 0.77, 0.96) > 0.22;
+        return whiteRatio(frame, 0.655, 0.905, 0.762, 0.948) > 0.55
+                && darkRatio(frame, 0.64, 0.885, 0.78, 0.965) > 0.20;
     }
 
     private boolean isConfirmVisible(Bitmap frame) {
@@ -120,10 +130,6 @@ public final class AutoContinueController {
 
     private double whiteRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
         return ratio(frame, x1, y1, x2, y2, PixelTest.WHITE);
-    }
-
-    private double pinkRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
-        return ratio(frame, x1, y1, x2, y2, PixelTest.PINK);
     }
 
     private double cyanRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -165,7 +171,6 @@ public final class AutoContinueController {
 
     private interface PixelTest {
         PixelTest WHITE = (r, g, b) -> r > 210 && g > 210 && b > 210;
-        PixelTest PINK = (r, g, b) -> r > 190 && b > 130 && g < 160;
         PixelTest CYAN = (r, g, b) -> g > 130 && b > 130 && r < 170;
         PixelTest DARK = (r, g, b) -> r < 95 && g < 95 && b < 130;
 
