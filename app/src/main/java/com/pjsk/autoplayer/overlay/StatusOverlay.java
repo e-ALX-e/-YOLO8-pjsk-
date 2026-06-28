@@ -25,6 +25,7 @@ public final class StatusOverlay {
     private final Runnable onStopClick;
     private final Runnable onPreviewClick;
     private final Runnable onNoClickClick;
+    private final Runnable onDebugDisplayClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private WindowManager windowManager;
@@ -37,6 +38,7 @@ public final class StatusOverlay {
     private Button detailsButton;
     private Button previewButton;
     private Button noClickButton;
+    private Button debugDisplayButton;
     private boolean collapsed;
     private boolean parametersVisible;
 
@@ -49,11 +51,13 @@ public final class StatusOverlay {
             Context context,
             Runnable onStopClick,
             Runnable onPreviewClick,
-            Runnable onNoClickClick) {
+            Runnable onNoClickClick,
+            Runnable onDebugDisplayClick) {
         this.context = context.getApplicationContext();
         this.onStopClick = onStopClick;
         this.onPreviewClick = onPreviewClick;
         this.onNoClickClick = onNoClickClick;
+        this.onDebugDisplayClick = onDebugDisplayClick;
     }
 
     public static boolean canDrawOverlays(Context context) {
@@ -88,6 +92,14 @@ public final class StatusOverlay {
         mainHandler.post(() -> {
             if (noClickButton != null) {
                 noClickButton.setText(enabled ? "允许点击" : "不点击");
+            }
+        });
+    }
+
+    public void setDebugDisplayEnabled(boolean enabled) {
+        mainHandler.post(() -> {
+            if (debugDisplayButton != null) {
+                debugDisplayButton.setText(enabled ? "关调试" : "调试显示");
             }
         });
     }
@@ -212,6 +224,12 @@ public final class StatusOverlay {
         noClickParams.setMargins(0, dp(6), dp(6), 0);
         row.addView(noClickButton, noClickParams);
 
+        debugDisplayButton = makeSmallButton("调试显示");
+        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
+        LinearLayout.LayoutParams debugParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        debugParams.setMargins(0, dp(6), dp(6), 0);
+        row.addView(debugDisplayButton, debugParams);
+
         Button stop = makeSmallButton("停止");
         stop.setOnClickListener(v -> onStopClick.run());
         LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
@@ -312,6 +330,7 @@ public final class StatusOverlay {
         detailsButton = null;
         previewButton = null;
         noClickButton = null;
+        debugDisplayButton = null;
         params = null;
         parametersVisible = false;
         collapsed = false;

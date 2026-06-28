@@ -9,6 +9,7 @@ public final class AppSettings {
     private static final String PREFS_NAME = "pjsk_settings";
     private static final String KEY_PREVIEW_ENABLED = "preview_enabled";
     private static final String KEY_NO_CLICK_MODE = "no_click_mode";
+    private static final String KEY_DEBUG_DISPLAY_ENABLED = "debug_display_enabled";
     private static final String KEY_ACTION_Y = "action_y";
     private static final String KEY_TOUCH_MAPPING_MODE = "touch_mapping_mode";
 
@@ -36,6 +37,14 @@ public final class AppSettings {
 
     public static void setNoClickMode(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_NO_CLICK_MODE, enabled).apply();
+    }
+
+    public static boolean isDebugDisplayEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_DEBUG_DISPLAY_ENABLED, false);
+    }
+
+    public static void setDebugDisplayEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_DEBUG_DISPLAY_ENABLED, enabled).apply();
     }
 
     public static double getActionY(Context context) {

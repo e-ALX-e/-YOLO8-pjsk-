@@ -23,6 +23,7 @@ import com.pjsk.autoplayer.overlay.DetectionPreviewOverlay;
 import com.pjsk.autoplayer.overlay.StatusOverlay;
 import com.pjsk.autoplayer.screen.ScreenCaptureSource;
 import com.pjsk.autoplayer.settings.AppSettings;
+import com.pjsk.autoplayer.settings.DebugDisplayController;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -462,11 +463,13 @@ public final class CaptureService extends Service {
                 stopEverything();
                 stopSelf();
             }, () -> setPreviewEnabled(!AppSettings.isPreviewEnabled(this)),
-                    this::toggleNoClickMode);
+                    this::toggleNoClickMode,
+                    this::toggleDebugDisplay);
         }
         statusOverlay.show(text);
         statusOverlay.setPreviewEnabled(AppSettings.isPreviewEnabled(this));
         statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
+        statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
     }
 
     private void toggleNoClickMode() {
@@ -476,6 +479,22 @@ public final class CaptureService extends Service {
             statusOverlay.setNoClickMode(enabled);
         }
         updateNotification(enabled ? "已开启不点击模式" : "5 秒后恢复点击");
+    }
+
+    private void toggleDebugDisplay() {
+        boolean enabled = !AppSettings.isDebugDisplayEnabled(this);
+        AppSettings.setDebugDisplayEnabled(this, enabled);
+        if (statusOverlay != null) {
+            statusOverlay.setDebugDisplayEnabled(enabled);
+        }
+        updateNotification(enabled ? "已开启调试显示" : "已关闭调试显示");
+        new Thread(() -> {
+            boolean ok = DebugDisplayController.setEnabled(enabled);
+            if (!ok) {
+                Log.w(TAG, "failed to apply debug display settings");
+                updateNotification("调试显示设置失败，请检查 root 权限");
+            }
+        }, "pjsk-debug-display").start();
     }
 
     private void setPreviewEnabled(boolean enabled) {
