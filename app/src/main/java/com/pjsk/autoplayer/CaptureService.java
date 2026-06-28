@@ -27,6 +27,7 @@ import com.pjsk.autoplayer.settings.AppSettings;
 import com.pjsk.autoplayer.settings.DebugDisplayController;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
@@ -206,6 +207,14 @@ public final class CaptureService extends Service {
                 return;
             }
 
+            long autoContinueStartMs = SystemClock.elapsedRealtime();
+            runAutoContinue(frame);
+            long autoContinueMs = Math.max(0L, SystemClock.elapsedRealtime() - autoContinueStartMs);
+            if (isAutoContinueSuppressingGameRecognition()) {
+                handleAutoContinueFrame(frame, inferenceStartMs, autoContinueMs);
+                return;
+            }
+
             long detectStartMs = SystemClock.elapsedRealtime();
             List<Detection> detections = currentDetector.detect(frame.bitmap);
             long detectMs = Math.max(0L, SystemClock.elapsedRealtime() - detectStartMs);
@@ -225,10 +234,6 @@ public final class CaptureService extends Service {
             long previewStartMs = SystemClock.elapsedRealtime();
             updatePreview(frame, detections, inferenceMs, actionYBase);
             long previewMs = Math.max(0L, SystemClock.elapsedRealtime() - previewStartMs);
-
-            long autoContinueStartMs = SystemClock.elapsedRealtime();
-            runAutoContinue(frame);
-            long autoContinueMs = Math.max(0L, SystemClock.elapsedRealtime() - autoContinueStartMs);
 
             long actionStartMs = SystemClock.elapsedRealtime();
             currentAutoPlayer.onFrame(
@@ -447,6 +452,56 @@ public final class CaptureService extends Service {
                 AppSettings.isAutoContinueEnabled(this),
                 isClickBlockedNow(),
                 AppSettings.getAutoContinueIntervalMs(this));
+    }
+
+    private boolean isAutoContinueSuppressingGameRecognition() {
+        AutoContinueController controller = autoContinueController;
+        return controller != null
+                && AppSettings.isAutoContinueEnabled(this)
+                && controller.shouldSuppressGameRecognition();
+    }
+
+    private void handleAutoContinueFrame(
+            ScreenCaptureSource.Frame frame,
+            long inferenceStartMs,
+            long autoContinueMs) {
+        lastInferenceMs = autoContinueMs;
+        recordProcessedFrame();
+        long statusStartMs = SystemClock.elapsedRealtime();
+        updateRuntimeStatus(0);
+        long statusMs = Math.max(0L, SystemClock.elapsedRealtime() - statusStartMs);
+        double actionYBase = AppSettings.getActionY(this);
+        long previewStartMs = SystemClock.elapsedRealtime();
+        updatePreview(frame, Collections.emptyList(), autoContinueMs, actionYBase);
+        long previewMs = Math.max(0L, SystemClock.elapsedRealtime() - previewStartMs);
+        long totalMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
+
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastDiagnosticsLogMs >= 1000) {
+            lastDiagnosticsLogMs = now;
+            Log.i(TAG, "frame=" + frame.width + "x" + frame.height
+                    + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                    + " fps=" + String.format(Locale.US, "%.1f", currentFps)
+                    + " infer=" + autoContinueMs + "ms"
+                    + " stageMs=capture:" + frame.captureMs
+                    + ",detect:paused"
+                    + ",status:" + statusMs
+                    + ",preview:" + previewMs
+                    + ",autoContinue:" + autoContinueMs
+                    + ",action:paused"
+                    + ",total:" + totalMs
+                    + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
+                    + " detections=0"
+                    + " actions=" + totalActions.get()
+                    + " tap=" + tapActions.get()
+                    + " hold=" + holdActions.get()
+                    + " flick=" + flickActions.get()
+                    + " actionY=" + String.format(Locale.US, "%.0f", actionYBase)
+                    + " clickMode=" + clickModeText()
+                    + " mapping=" + AppSettings.touchMappingLabel(
+                    AppSettings.getTouchMappingMode(this))
+                    + " detector=paused:autoContinue");
+        }
     }
 
     private void failStart(String text) {

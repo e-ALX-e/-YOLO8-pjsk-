@@ -15,6 +15,7 @@ public final class AutoContinueController {
     private static final long SELECT_REPEAT_MS = 700;
     private static final long SELECT_TO_CONFIRM_DELAY_MS = 900;
     private static final long CONFIRM_REPEAT_MS = 1200;
+    private static final long START_RESUME_DELAY_MS = 1800;
     private static final int SELECT_CONFIRM_FRAMES = 2;
 
     private static final double CONTINUE_X = 1595.0 / 1920.0;
@@ -23,6 +24,8 @@ public final class AutoContinueController {
     private static final double SELECT_SONG_Y = 820.0 / 887.0;
     private static final double CONFIRM_X = 1415.0 / 1920.0;
     private static final double CONFIRM_Y = 725.0 / 887.0;
+    private static final double START_X = 1580.0 / 1920.0;
+    private static final double START_Y = 790.0 / 887.0;
 
     private final TouchInjector injector;
     private int state = State.IDLE;
@@ -41,6 +44,10 @@ public final class AutoContinueController {
         lastDetectMs = 0L;
         waitUntilMs = 0L;
         selectVisibleFrames = 0;
+    }
+
+    public boolean shouldSuppressGameRecognition() {
+        return state != State.IDLE;
     }
 
     public void onFrame(
@@ -62,12 +69,14 @@ public final class AutoContinueController {
         boolean liveClearVisible = false;
         boolean selectSongVisible = false;
         boolean confirmVisible = false;
+        boolean startVisible = false;
         if (shouldDetect) {
             lastDetectMs = now;
             liveClearVisible = isLiveClear(frame);
             if (state != State.IDLE) {
                 selectSongVisible = isSelectSongVisible(frame);
                 confirmVisible = isConfirmVisible(frame);
+                startVisible = isStartVisible(frame);
             }
         }
 
@@ -113,13 +122,26 @@ public final class AutoContinueController {
                 break;
 
             case State.CONFIRM_SENT:
-                if (now - lastTapMs >= CONFIRM_REPEAT_MS && confirmVisible) {
+                if (startVisible && now - lastTapMs >= CONFIRM_REPEAT_MS) {
+                    tapNormalized(START_X, START_Y, displayWidth, displayHeight);
+                    state = State.START_SENT;
+                    lastTapMs = now;
+                    waitUntilMs = now + START_RESUME_DELAY_MS;
+                    Log.i(TAG, "start button detected");
+                } else if (now - lastTapMs >= CONFIRM_REPEAT_MS && confirmVisible) {
                     tapNormalized(CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
                     lastTapMs = now;
                 }
                 if (liveClearVisible) {
                     state = State.CLEAR_ADVANCING;
                     lastTapMs = 0L;
+                }
+                break;
+
+            case State.START_SENT:
+                if (now >= waitUntilMs) {
+                    reset();
+                    Log.i(TAG, "game recognition resumed");
                 }
                 break;
         }
@@ -160,6 +182,11 @@ public final class AutoContinueController {
     private boolean isConfirmVisible(Bitmap frame) {
         return cyanRatio(frame, 0.69, 0.78, 0.785, 0.855) > 0.08
                 && darkRatio(frame, 0.69, 0.78, 0.785, 0.855) < 0.15;
+    }
+
+    private boolean isStartVisible(Bitmap frame) {
+        return cyanRatio(frame, 0.72, 0.78, 0.94, 0.96) > 0.10
+                && darkRatio(frame, 0.72, 0.78, 0.94, 0.96) < 0.35;
     }
 
     private double whiteRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -216,6 +243,7 @@ public final class AutoContinueController {
         static final int CLEAR_ADVANCING = 1;
         static final int WAIT_SONG_PAGE = 2;
         static final int CONFIRM_SENT = 3;
+        static final int START_SENT = 4;
 
         private State() {
         }
