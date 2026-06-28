@@ -226,7 +226,9 @@ public final class CaptureService extends Service {
             updatePreview(frame, detections, inferenceMs, actionYBase);
             long previewMs = Math.max(0L, SystemClock.elapsedRealtime() - previewStartMs);
 
+            long autoContinueStartMs = SystemClock.elapsedRealtime();
             runAutoContinue(frame);
+            long autoContinueMs = Math.max(0L, SystemClock.elapsedRealtime() - autoContinueStartMs);
 
             long actionStartMs = SystemClock.elapsedRealtime();
             currentAutoPlayer.onFrame(
@@ -250,6 +252,7 @@ public final class CaptureService extends Service {
                         + ",detect:" + detectMs
                         + ",status:" + statusMs
                         + ",preview:" + previewMs
+                        + ",autoContinue:" + autoContinueMs
                         + ",action:" + actionMs
                         + ",total:" + totalMs
                         + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)

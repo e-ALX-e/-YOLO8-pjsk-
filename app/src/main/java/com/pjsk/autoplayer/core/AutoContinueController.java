@@ -10,6 +10,8 @@ public final class AutoContinueController {
     private static final String TAG = "PJSK-AutoContinue";
 
     private static final int TOUCH_ID = 9;
+    private static final long DETECTION_INTERVAL_MS = 250;
+    private static final long SELECT_REPEAT_MS = 700;
     private static final long SELECT_TO_CONFIRM_DELAY_MS = 900;
     private static final long CONFIRM_REPEAT_MS = 1200;
 
@@ -23,6 +25,7 @@ public final class AutoContinueController {
     private final TouchInjector injector;
     private int state = State.IDLE;
     private long lastTapMs;
+    private long lastDetectMs;
     private long waitUntilMs;
 
     public AutoContinueController(TouchInjector injector) {
@@ -32,6 +35,7 @@ public final class AutoContinueController {
     public void reset() {
         state = State.IDLE;
         lastTapMs = 0L;
+        lastDetectMs = 0L;
         waitUntilMs = 0L;
     }
 
@@ -50,15 +54,26 @@ public final class AutoContinueController {
         }
 
         long now = SystemClock.elapsedRealtime();
+        boolean shouldDetect = now - lastDetectMs >= DETECTION_INTERVAL_MS;
+        boolean liveClearVisible = false;
+        boolean selectSongVisible = false;
+        boolean confirmVisible = false;
+        if (shouldDetect) {
+            lastDetectMs = now;
+            liveClearVisible = isLiveClear(frame);
+            selectSongVisible = isSelectSongVisible(frame);
+            confirmVisible = isConfirmVisible(frame);
+        }
+
         switch (state) {
             case State.IDLE:
-                if (isSelectSongVisible(frame)) {
+                if (selectSongVisible) {
                     tapNormalized(SELECT_SONG_X, SELECT_SONG_Y, displayWidth, displayHeight);
                     state = State.WAIT_SONG_PAGE;
                     waitUntilMs = now + SELECT_TO_CONFIRM_DELAY_MS;
                     lastTapMs = now;
                     Log.i(TAG, "select song detected from idle");
-                } else if (isLiveClear(frame)) {
+                } else if (liveClearVisible) {
                     state = State.CLEAR_ADVANCING;
                     lastTapMs = 0L;
                     Log.i(TAG, "LIVE CLEAR detected");
@@ -66,7 +81,7 @@ public final class AutoContinueController {
                 break;
 
             case State.CLEAR_ADVANCING:
-                if (isSelectSongVisible(frame)) {
+                if (selectSongVisible) {
                     tapNormalized(SELECT_SONG_X, SELECT_SONG_Y, displayWidth, displayHeight);
                     state = State.WAIT_SONG_PAGE;
                     waitUntilMs = now + SELECT_TO_CONFIRM_DELAY_MS;
@@ -82,20 +97,24 @@ public final class AutoContinueController {
                 if (now < waitUntilMs) {
                     return;
                 }
-                if (isConfirmVisible(frame)) {
+                if (confirmVisible) {
                     tapNormalized(CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
                     state = State.CONFIRM_SENT;
                     lastTapMs = now;
                     Log.i(TAG, "song confirm detected");
+                } else if (selectSongVisible && now - lastTapMs >= SELECT_REPEAT_MS) {
+                    tapNormalized(SELECT_SONG_X, SELECT_SONG_Y, displayWidth, displayHeight);
+                    lastTapMs = now;
+                    Log.i(TAG, "select song retry");
                 }
                 break;
 
             case State.CONFIRM_SENT:
-                if (now - lastTapMs >= CONFIRM_REPEAT_MS && isConfirmVisible(frame)) {
+                if (now - lastTapMs >= CONFIRM_REPEAT_MS && confirmVisible) {
                     tapNormalized(CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
                     lastTapMs = now;
                 }
-                if (isLiveClear(frame)) {
+                if (liveClearVisible) {
                     state = State.CLEAR_ADVANCING;
                     lastTapMs = 0L;
                 }
@@ -147,7 +166,7 @@ public final class AutoContinueController {
         int top = clamp((int) Math.round(y1 * height), 0, height - 1);
         int right = clamp((int) Math.round(x2 * width), left + 1, width);
         int bottom = clamp((int) Math.round(y2 * height), top + 1, height);
-        int step = Math.max(1, Math.min(width, height) / 240);
+        int step = Math.max(3, Math.min(width, height) / 80);
         int total = 0;
         int matched = 0;
         for (int y = top; y < bottom; y += step) {
