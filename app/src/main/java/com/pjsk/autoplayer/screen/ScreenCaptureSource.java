@@ -61,8 +61,8 @@ public final class ScreenCaptureSource implements AutoCloseable {
 
     public void start() {
         int[] metrics = getDisplayMetrics();
-        displayWidth = metrics[0];
-        displayHeight = metrics[1];
+        displayWidth = Math.max(metrics[0], metrics[1]);
+        displayHeight = Math.min(metrics[0], metrics[1]);
         densityDpi = metrics[2];
         int[] captureSize = chooseCaptureSize(displayWidth, displayHeight);
         width = captureSize[0];
