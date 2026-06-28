@@ -360,6 +360,11 @@ public final class CaptureService extends Service {
         return "点击";
     }
 
+    private boolean isClickBlockedNow() {
+        return AppSettings.isNoClickMode(this)
+                || clickResumeAtMs > SystemClock.elapsedRealtime();
+    }
+
     private void updateRuntimeStatus(int detectionCount) {
         long now = SystemClock.elapsedRealtime();
         if (now - lastOverlayUpdateMs >= OVERLAY_UPDATE_INTERVAL_MS) {
@@ -367,6 +372,7 @@ public final class CaptureService extends Service {
             updateVisibleStatus(formatStatus(detectionCount), false);
             if (statusOverlay != null) {
                 statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
+                statusOverlay.setClickBlocked(isClickBlockedNow());
             }
         }
 
@@ -469,14 +475,22 @@ public final class CaptureService extends Service {
         statusOverlay.show(text);
         statusOverlay.setPreviewEnabled(AppSettings.isPreviewEnabled(this));
         statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
+        statusOverlay.setClickBlocked(isClickBlockedNow());
         statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
     }
 
     private void toggleNoClickMode() {
         boolean enabled = !AppSettings.isNoClickMode(this);
         AppSettings.setNoClickMode(this, enabled);
+        if (enabled) {
+            clickResumeAtMs = 0L;
+        } else {
+            clickResumeAtMs = SystemClock.elapsedRealtime() + CLICK_RESUME_DELAY_MS;
+            previousNoClickMode = false;
+        }
         if (statusOverlay != null) {
             statusOverlay.setNoClickMode(enabled);
+            statusOverlay.setClickBlocked(true);
         }
         updateNotification(enabled ? "已开启不点击模式" : "5 秒后恢复点击");
     }

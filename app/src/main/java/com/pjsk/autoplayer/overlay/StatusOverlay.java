@@ -94,8 +94,11 @@ public final class StatusOverlay {
             if (noClickButton != null) {
                 noClickButton.setText(enabled ? "允许点击" : "不点击");
             }
-            updateClickModeColor(enabled);
         });
+    }
+
+    public void setClickBlocked(boolean blocked) {
+        mainHandler.post(() -> updateClickModeColor(blocked));
     }
 
     public void setDebugDisplayEnabled(boolean enabled) {
