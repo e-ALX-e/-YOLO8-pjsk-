@@ -33,6 +33,7 @@ public final class StatusOverlay {
     private LinearLayout rootView;
     private LinearLayout contentView;
     private LinearLayout parameterView;
+    private TextView statusTitleView;
     private TextView statusView;
     private Button collapseButton;
     private Button detailsButton;
@@ -93,6 +94,7 @@ public final class StatusOverlay {
             if (noClickButton != null) {
                 noClickButton.setText(enabled ? "允许点击" : "不点击");
             }
+            updateClickModeColor(enabled);
         });
     }
 
@@ -165,12 +167,12 @@ public final class StatusOverlay {
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView title = new TextView(context);
-        title.setText("运行状态");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(14f);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        header.addView(title, new LinearLayout.LayoutParams(
+        statusTitleView = new TextView(context);
+        statusTitleView.setText("运行状态");
+        statusTitleView.setTextSize(14f);
+        statusTitleView.setTypeface(Typeface.DEFAULT_BOLD);
+        updateClickModeColor(false);
+        header.addView(statusTitleView, new LinearLayout.LayoutParams(
                 0,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 1f));
@@ -288,6 +290,14 @@ public final class StatusOverlay {
         updateLayout();
     }
 
+    private void updateClickModeColor(boolean noClickMode) {
+        if (statusTitleView != null) {
+            statusTitleView.setTextColor(noClickMode
+                    ? Color.rgb(255, 102, 102)
+                    : Color.rgb(94, 232, 142));
+        }
+    }
+
     private void updateLayout() {
         if (windowManager != null && rootView != null && params != null) {
             try {
@@ -325,6 +335,7 @@ public final class StatusOverlay {
         rootView = null;
         contentView = null;
         parameterView = null;
+        statusTitleView = null;
         statusView = null;
         collapseButton = null;
         detailsButton = null;
