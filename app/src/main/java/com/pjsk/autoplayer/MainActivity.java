@@ -32,6 +32,7 @@ public final class MainActivity extends Activity {
     private SeekBar calibrationSeekBar;
     private Switch previewSwitch;
     private Switch noClickSwitch;
+    private Switch autoContinueSwitch;
     private boolean updatingCalibrationUi;
 
     @Override
@@ -113,6 +114,7 @@ public final class MainActivity extends Activity {
         noClickParams.setMargins(0, dp(6), 0, 0);
         root.addView(noClickSwitch, noClickParams);
 
+        addAutoContinueControls(root);
         addCalibrationControls(root);
         addTouchMappingControls(root);
 
@@ -155,6 +157,9 @@ public final class MainActivity extends Activity {
         }
         if (noClickSwitch != null) {
             noClickSwitch.setChecked(AppSettings.isNoClickMode(this));
+        }
+        if (autoContinueSwitch != null) {
+            autoContinueSwitch.setChecked(AppSettings.isAutoContinueEnabled(this));
         }
         updateCalibrationUi();
         updateTouchMappingUi();
@@ -201,6 +206,29 @@ public final class MainActivity extends Activity {
         overlayStatusView.setTextColor(granted
                 ? Color.rgb(30, 122, 72)
                 : Color.rgb(180, 82, 32));
+    }
+
+    private void addAutoContinueControls(LinearLayout root) {
+        TextView title = new TextView(this);
+        title.setText("自动继续");
+        title.setTextColor(Color.rgb(20, 24, 32));
+        title.setTextSize(16f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams titleParams = matchWrap();
+        titleParams.setMargins(0, dp(12), 0, dp(2));
+        root.addView(title, titleParams);
+
+        autoContinueSwitch = new Switch(this);
+        autoContinueSwitch.setText("识别结束后接管开始流程");
+        autoContinueSwitch.setTextSize(15f);
+        autoContinueSwitch.setTextColor(Color.rgb(45, 52, 64));
+        autoContinueSwitch.setChecked(AppSettings.isAutoContinueEnabled(this));
+        autoContinueSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            AppSettings.setAutoContinueEnabled(this, isChecked);
+            statusView.setText(isChecked ? "状态：自动继续已开启" : "状态：自动继续已关闭");
+        });
+        root.addView(autoContinueSwitch, matchWrap());
     }
 
     private void addCalibrationControls(LinearLayout root) {

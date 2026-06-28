@@ -15,6 +15,7 @@ import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Log;
 
+import com.pjsk.autoplayer.core.AutoContinueController;
 import com.pjsk.autoplayer.core.AutoPlayer;
 import com.pjsk.autoplayer.core.Detection;
 import com.pjsk.autoplayer.input.RootEventInjector;
@@ -26,6 +27,7 @@ import com.pjsk.autoplayer.settings.AppSettings;
 import com.pjsk.autoplayer.settings.DebugDisplayController;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
@@ -59,6 +61,7 @@ public final class CaptureService extends Service {
     private ScreenCaptureSource captureSource;
     private NcnnDetector detector;
     private AutoPlayer autoPlayer;
+    private AutoContinueController autoContinueController;
     private RootEventInjector injector;
     private StatusOverlay statusOverlay;
     private DetectionPreviewOverlay previewOverlay;
@@ -146,6 +149,7 @@ public final class CaptureService extends Service {
         Log.i(TAG, "detector status: " + detectorStatus);
         injector = new RootEventInjector(this);
         autoPlayer = new AutoPlayer(injector, this::recordAction);
+        autoContinueController = new AutoContinueController(injector);
         resetCounters();
         previousNoClickMode = AppSettings.isNoClickMode(this);
         clickResumeAtMs = 0L;
@@ -203,6 +207,14 @@ public final class CaptureService extends Service {
                 return;
             }
 
+            long autoContinueStartMs = SystemClock.elapsedRealtime();
+            runAutoContinue(frame);
+            long autoContinueMs = Math.max(0L, SystemClock.elapsedRealtime() - autoContinueStartMs);
+            if (isAutoContinueSuppressingGameRecognition()) {
+                handleAutoContinueFrame(frame, inferenceStartMs, autoContinueMs);
+                return;
+            }
+
             long detectStartMs = SystemClock.elapsedRealtime();
             List<Detection> detections = currentDetector.detect(frame.bitmap);
             long detectMs = Math.max(0L, SystemClock.elapsedRealtime() - detectStartMs);
@@ -245,6 +257,7 @@ public final class CaptureService extends Service {
                         + ",detect:" + detectMs
                         + ",status:" + statusMs
                         + ",preview:" + previewMs
+                        + ",autoContinue:" + autoContinueMs
                         + ",action:" + actionMs
                         + ",total:" + totalMs
                         + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
@@ -266,6 +279,63 @@ public final class CaptureService extends Service {
         } finally {
             frame.close();
             processing.set(false);
+        }
+    }
+
+    private void runAutoContinue(ScreenCaptureSource.Frame frame) {
+        AutoContinueController controller = autoContinueController;
+        if (controller == null) {
+            return;
+        }
+        controller.onFrame(
+                frame.bitmap,
+                frame.displayWidth,
+                frame.displayHeight,
+                AppSettings.isAutoContinueEnabled(this),
+                isClickBlockedNow());
+    }
+
+    private boolean isAutoContinueSuppressingGameRecognition() {
+        AutoContinueController controller = autoContinueController;
+        return controller != null
+                && AppSettings.isAutoContinueEnabled(this)
+                && controller.shouldSuppressGameRecognition();
+    }
+
+    private void handleAutoContinueFrame(
+            ScreenCaptureSource.Frame frame,
+            long inferenceStartMs,
+            long autoContinueMs) {
+        lastInferenceMs = autoContinueMs;
+        recordProcessedFrame();
+        long statusStartMs = SystemClock.elapsedRealtime();
+        updateRuntimeStatus(0);
+        long statusMs = Math.max(0L, SystemClock.elapsedRealtime() - statusStartMs);
+        double actionYBase = AppSettings.getActionY(this);
+        long previewStartMs = SystemClock.elapsedRealtime();
+        updatePreview(frame, Collections.emptyList(), autoContinueMs, actionYBase);
+        long previewMs = Math.max(0L, SystemClock.elapsedRealtime() - previewStartMs);
+        long totalMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
+
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastDiagnosticsLogMs >= 1000) {
+            lastDiagnosticsLogMs = now;
+            Log.i(TAG, "frame=" + frame.width + "x" + frame.height
+                    + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                    + " fps=" + String.format(Locale.US, "%.1f", currentFps)
+                    + " infer=" + autoContinueMs + "ms"
+                    + " stageMs=capture:" + frame.captureMs
+                    + ",detect:paused"
+                    + ",status:" + statusMs
+                    + ",preview:" + previewMs
+                    + ",autoContinue:" + autoContinueMs
+                    + ",action:paused"
+                    + ",total:" + totalMs
+                    + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
+                    + " clickMode=" + clickModeText()
+                    + " mapping=" + AppSettings.touchMappingLabel(
+                    AppSettings.getTouchMappingMode(this))
+                    + " detector=paused:autoContinue");
         }
     }
 
@@ -458,6 +528,7 @@ public final class CaptureService extends Service {
         }
         processing.set(false);
         autoPlayer = null;
+        autoContinueController = null;
         detector = null;
         detectorStatus = "";
         resetCounters();
