@@ -24,8 +24,8 @@ public final class AutoContinueController {
     private static final double SELECT_SONG_Y = 820.0 / 887.0;
     private static final double CONFIRM_X = 1415.0 / 1920.0;
     private static final double CONFIRM_Y = 725.0 / 887.0;
-    private static final double START_X = 1580.0 / 1920.0;
-    private static final double START_Y = 790.0 / 887.0;
+    private static final double START_X = 1415.0 / 1920.0;
+    private static final double START_Y = 675.0 / 887.0;
 
     private final TouchInjector injector;
     private int state = State.IDLE;
@@ -185,8 +185,8 @@ public final class AutoContinueController {
     }
 
     private boolean isStartVisible(Bitmap frame) {
-        return cyanRatio(frame, 0.72, 0.78, 0.94, 0.96) > 0.10
-                && darkRatio(frame, 0.72, 0.78, 0.94, 0.96) < 0.35;
+        return cyanRatio(frame, 0.725, 0.715, 0.755, 0.79) > 0.45
+                && darkRatio(frame, 0.725, 0.715, 0.755, 0.79) < 0.08;
     }
 
     private double whiteRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
