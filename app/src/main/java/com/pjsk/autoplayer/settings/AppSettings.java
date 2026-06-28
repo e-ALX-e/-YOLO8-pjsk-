@@ -10,6 +10,8 @@ public final class AppSettings {
     private static final String KEY_PREVIEW_ENABLED = "preview_enabled";
     private static final String KEY_NO_CLICK_MODE = "no_click_mode";
     private static final String KEY_DEBUG_DISPLAY_ENABLED = "debug_display_enabled";
+    private static final String KEY_AUTO_CONTINUE_ENABLED = "auto_continue_enabled";
+    private static final String KEY_AUTO_CONTINUE_INTERVAL_MS = "auto_continue_interval_ms";
     private static final String KEY_ACTION_Y = "action_y";
     private static final String KEY_TOUCH_MAPPING_MODE = "touch_mapping_mode";
 
@@ -19,6 +21,9 @@ public final class AppSettings {
     public static final int TOUCH_MAPPING_LANDSCAPE_90 = 0;
     public static final int TOUCH_MAPPING_DIRECT = 1;
     public static final int TOUCH_MAPPING_LANDSCAPE_270 = 2;
+    public static final int AUTO_CONTINUE_INTERVAL_MIN_MS = 300;
+    public static final int AUTO_CONTINUE_INTERVAL_MAX_MS = 1500;
+    public static final int AUTO_CONTINUE_INTERVAL_DEFAULT_MS = 500;
 
     private AppSettings() {
     }
@@ -45,6 +50,27 @@ public final class AppSettings {
 
     public static void setDebugDisplayEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_DEBUG_DISPLAY_ENABLED, enabled).apply();
+    }
+
+    public static boolean isAutoContinueEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_AUTO_CONTINUE_ENABLED, false);
+    }
+
+    public static void setAutoContinueEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_AUTO_CONTINUE_ENABLED, enabled).apply();
+    }
+
+    public static int getAutoContinueIntervalMs(Context context) {
+        return clampAutoContinueIntervalMs(
+                prefs(context).getInt(KEY_AUTO_CONTINUE_INTERVAL_MS,
+                        AUTO_CONTINUE_INTERVAL_DEFAULT_MS));
+    }
+
+    public static void setAutoContinueIntervalMs(Context context, int intervalMs) {
+        prefs(context).edit()
+                .putInt(KEY_AUTO_CONTINUE_INTERVAL_MS,
+                        clampAutoContinueIntervalMs(intervalMs))
+                .apply();
     }
 
     public static double getActionY(Context context) {
@@ -103,6 +129,12 @@ public final class AppSettings {
             return TOUCH_MAPPING_LANDSCAPE_90;
         }
         return mode;
+    }
+
+    private static int clampAutoContinueIntervalMs(int intervalMs) {
+        return Math.max(
+                AUTO_CONTINUE_INTERVAL_MIN_MS,
+                Math.min(AUTO_CONTINUE_INTERVAL_MAX_MS, intervalMs));
     }
 
     private static SharedPreferences prefs(Context context) {

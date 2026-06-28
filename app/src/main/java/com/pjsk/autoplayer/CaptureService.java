@@ -15,6 +15,7 @@ import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Log;
 
+import com.pjsk.autoplayer.core.AutoContinueController;
 import com.pjsk.autoplayer.core.AutoPlayer;
 import com.pjsk.autoplayer.core.Detection;
 import com.pjsk.autoplayer.input.RootEventInjector;
@@ -59,6 +60,7 @@ public final class CaptureService extends Service {
     private ScreenCaptureSource captureSource;
     private NcnnDetector detector;
     private AutoPlayer autoPlayer;
+    private AutoContinueController autoContinueController;
     private RootEventInjector injector;
     private StatusOverlay statusOverlay;
     private DetectionPreviewOverlay previewOverlay;
@@ -146,6 +148,7 @@ public final class CaptureService extends Service {
         Log.i(TAG, "detector status: " + detectorStatus);
         injector = new RootEventInjector(this);
         autoPlayer = new AutoPlayer(injector, this::recordAction);
+        autoContinueController = new AutoContinueController(injector);
         resetCounters();
         previousNoClickMode = AppSettings.isNoClickMode(this);
         clickResumeAtMs = 0L;
@@ -222,6 +225,8 @@ public final class CaptureService extends Service {
             long previewStartMs = SystemClock.elapsedRealtime();
             updatePreview(frame, detections, inferenceMs, actionYBase);
             long previewMs = Math.max(0L, SystemClock.elapsedRealtime() - previewStartMs);
+
+            runAutoContinue(frame);
 
             long actionStartMs = SystemClock.elapsedRealtime();
             currentAutoPlayer.onFrame(
@@ -427,6 +432,20 @@ public final class CaptureService extends Service {
                 actionYBase);
     }
 
+    private void runAutoContinue(ScreenCaptureSource.Frame frame) {
+        AutoContinueController controller = autoContinueController;
+        if (controller == null) {
+            return;
+        }
+        controller.onFrame(
+                frame.bitmap,
+                frame.displayWidth,
+                frame.displayHeight,
+                AppSettings.isAutoContinueEnabled(this),
+                isClickBlockedNow(),
+                AppSettings.getAutoContinueIntervalMs(this));
+    }
+
     private void failStart(String text) {
         releaseRuntime();
         running = false;
@@ -458,6 +477,7 @@ public final class CaptureService extends Service {
         }
         processing.set(false);
         autoPlayer = null;
+        autoContinueController = null;
         detector = null;
         detectorStatus = "";
         resetCounters();

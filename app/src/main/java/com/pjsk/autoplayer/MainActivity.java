@@ -30,9 +30,13 @@ public final class MainActivity extends Activity {
     private TextView calibrationValueView;
     private TextView touchMappingView;
     private SeekBar calibrationSeekBar;
+    private SeekBar autoContinueIntervalSeekBar;
     private Switch previewSwitch;
     private Switch noClickSwitch;
+    private Switch autoContinueSwitch;
+    private TextView autoContinueIntervalView;
     private boolean updatingCalibrationUi;
+    private boolean updatingAutoContinueUi;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -113,6 +117,7 @@ public final class MainActivity extends Activity {
         noClickParams.setMargins(0, dp(6), 0, 0);
         root.addView(noClickSwitch, noClickParams);
 
+        addAutoContinueControls(root);
         addCalibrationControls(root);
         addTouchMappingControls(root);
 
@@ -156,6 +161,10 @@ public final class MainActivity extends Activity {
         if (noClickSwitch != null) {
             noClickSwitch.setChecked(AppSettings.isNoClickMode(this));
         }
+        if (autoContinueSwitch != null) {
+            autoContinueSwitch.setChecked(AppSettings.isAutoContinueEnabled(this));
+        }
+        updateAutoContinueUi();
         updateCalibrationUi();
         updateTouchMappingUi();
     }
@@ -201,6 +210,78 @@ public final class MainActivity extends Activity {
         overlayStatusView.setTextColor(granted
                 ? Color.rgb(30, 122, 72)
                 : Color.rgb(180, 82, 32));
+    }
+
+    private void addAutoContinueControls(LinearLayout root) {
+        TextView title = new TextView(this);
+        title.setText("自动继续");
+        title.setTextColor(Color.rgb(20, 24, 32));
+        title.setTextSize(16f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams titleParams = matchWrap();
+        titleParams.setMargins(0, dp(12), 0, dp(2));
+        root.addView(title, titleParams);
+
+        autoContinueSwitch = new Switch(this);
+        autoContinueSwitch.setText("LIVE CLEAR 后自动回到选歌并确认");
+        autoContinueSwitch.setTextSize(15f);
+        autoContinueSwitch.setTextColor(Color.rgb(45, 52, 64));
+        autoContinueSwitch.setChecked(AppSettings.isAutoContinueEnabled(this));
+        autoContinueSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            AppSettings.setAutoContinueEnabled(this, isChecked);
+            statusView.setText(isChecked ? "状态：自动继续已开启" : "状态：自动继续已关闭");
+        });
+        root.addView(autoContinueSwitch, matchWrap());
+
+        autoContinueIntervalView = new TextView(this);
+        autoContinueIntervalView.setTextColor(Color.rgb(45, 52, 64));
+        autoContinueIntervalView.setTextSize(15f);
+        autoContinueIntervalView.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams valueParams = matchWrap();
+        valueParams.setMargins(0, dp(4), 0, 0);
+        root.addView(autoContinueIntervalView, valueParams);
+
+        autoContinueIntervalSeekBar = new SeekBar(this);
+        autoContinueIntervalSeekBar.setMax(
+                AppSettings.AUTO_CONTINUE_INTERVAL_MAX_MS
+                        - AppSettings.AUTO_CONTINUE_INTERVAL_MIN_MS);
+        autoContinueIntervalSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (!fromUser || updatingAutoContinueUi) {
+                    return;
+                }
+                int intervalMs = AppSettings.AUTO_CONTINUE_INTERVAL_MIN_MS + progress;
+                AppSettings.setAutoContinueIntervalMs(MainActivity.this, intervalMs);
+                updateAutoContinueUi();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
+        LinearLayout.LayoutParams seekParams = matchWrap();
+        seekParams.setMargins(0, dp(4), 0, 0);
+        root.addView(autoContinueIntervalSeekBar, seekParams);
+
+        updateAutoContinueUi();
+    }
+
+    private void updateAutoContinueUi() {
+        if (autoContinueIntervalView == null || autoContinueIntervalSeekBar == null) {
+            return;
+        }
+        int intervalMs = AppSettings.getAutoContinueIntervalMs(this);
+        autoContinueIntervalView.setText("继续点击间隔：" + (intervalMs / 1000.0f) + " 秒");
+        updatingAutoContinueUi = true;
+        autoContinueIntervalSeekBar.setProgress(
+                intervalMs - AppSettings.AUTO_CONTINUE_INTERVAL_MIN_MS);
+        updatingAutoContinueUi = false;
     }
 
     private void addCalibrationControls(LinearLayout root) {
