@@ -175,11 +175,11 @@ public final class StatusOverlay {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 1f));
 
-        detailsButton = makeSmallButton("显示参数");
-        detailsButton.setOnClickListener(v -> setParametersVisible(!parametersVisible));
-        LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(dp(86), dp(32));
-        detailsParams.setMargins(0, 0, dp(6), 0);
-        header.addView(detailsButton, detailsParams);
+        debugDisplayButton = makeSmallButton("调试显示");
+        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
+        LinearLayout.LayoutParams debugParams = new LinearLayout.LayoutParams(dp(86), dp(32));
+        debugParams.setMargins(0, 0, dp(6), 0);
+        header.addView(debugDisplayButton, debugParams);
 
         collapseButton = makeSmallButton("折叠");
         collapseButton.setOnClickListener(v -> setCollapsed(!collapsed));
@@ -224,11 +224,11 @@ public final class StatusOverlay {
         noClickParams.setMargins(0, dp(6), dp(6), 0);
         row.addView(noClickButton, noClickParams);
 
-        debugDisplayButton = makeSmallButton("调试显示");
-        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
-        LinearLayout.LayoutParams debugParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
-        debugParams.setMargins(0, dp(6), dp(6), 0);
-        row.addView(debugDisplayButton, debugParams);
+        detailsButton = makeSmallButton("显示参数");
+        detailsButton.setOnClickListener(v -> setParametersVisible(!parametersVisible));
+        LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        detailsParams.setMargins(0, dp(6), dp(6), 0);
+        row.addView(detailsButton, detailsParams);
 
         Button stop = makeSmallButton("停止");
         stop.setOnClickListener(v -> onStopClick.run());
@@ -280,9 +280,9 @@ public final class StatusOverlay {
         }
         if (rootView != null) {
             rootView.setPadding(
-                    collapsed ? dp(10) : dp(10),
+                    dp(10),
                     collapsed ? dp(6) : dp(8),
-                    collapsed ? dp(10) : dp(10),
+                    dp(10),
                     collapsed ? dp(6) : dp(8));
         }
         updateLayout();
