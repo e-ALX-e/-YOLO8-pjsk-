@@ -10,10 +10,12 @@ public final class AutoContinueController {
     private static final String TAG = "PJSK-AutoContinue";
 
     private static final int TOUCH_ID = 9;
-    private static final long DETECTION_INTERVAL_MS = 250;
+    private static final long IDLE_DETECTION_INTERVAL_MS = 500;
+    private static final long RESULT_DETECTION_INTERVAL_MS = 250;
     private static final long SELECT_REPEAT_MS = 700;
     private static final long SELECT_TO_CONFIRM_DELAY_MS = 900;
     private static final long CONFIRM_REPEAT_MS = 1200;
+    private static final int SELECT_CONFIRM_FRAMES = 2;
 
     private static final double CONTINUE_X = 1595.0 / 1920.0;
     private static final double CONTINUE_Y = 772.0 / 887.0;
@@ -27,6 +29,7 @@ public final class AutoContinueController {
     private long lastTapMs;
     private long lastDetectMs;
     private long waitUntilMs;
+    private int selectVisibleFrames;
 
     public AutoContinueController(TouchInjector injector) {
         this.injector = injector;
@@ -37,6 +40,7 @@ public final class AutoContinueController {
         lastTapMs = 0L;
         lastDetectMs = 0L;
         waitUntilMs = 0L;
+        selectVisibleFrames = 0;
     }
 
     public void onFrame(
@@ -54,38 +58,37 @@ public final class AutoContinueController {
         }
 
         long now = SystemClock.elapsedRealtime();
-        boolean shouldDetect = now - lastDetectMs >= DETECTION_INTERVAL_MS;
+        boolean shouldDetect = now - lastDetectMs >= detectionIntervalMs();
         boolean liveClearVisible = false;
         boolean selectSongVisible = false;
         boolean confirmVisible = false;
         if (shouldDetect) {
             lastDetectMs = now;
             liveClearVisible = isLiveClear(frame);
-            selectSongVisible = isSelectSongVisible(frame);
-            confirmVisible = isConfirmVisible(frame);
+            if (state != State.IDLE) {
+                selectSongVisible = isSelectSongVisible(frame);
+                confirmVisible = isConfirmVisible(frame);
+            }
         }
 
         switch (state) {
             case State.IDLE:
-                if (selectSongVisible) {
-                    tapNormalized(SELECT_SONG_X, SELECT_SONG_Y, displayWidth, displayHeight);
-                    state = State.WAIT_SONG_PAGE;
-                    waitUntilMs = now + SELECT_TO_CONFIRM_DELAY_MS;
-                    lastTapMs = now;
-                    Log.i(TAG, "select song detected from idle");
-                } else if (liveClearVisible) {
+                if (liveClearVisible) {
                     state = State.CLEAR_ADVANCING;
                     lastTapMs = 0L;
+                    selectVisibleFrames = 0;
                     Log.i(TAG, "LIVE CLEAR detected");
                 }
                 break;
 
             case State.CLEAR_ADVANCING:
-                if (selectSongVisible) {
+                updateSelectVisibleFrames(selectSongVisible);
+                if (selectVisibleFrames >= SELECT_CONFIRM_FRAMES) {
                     tapNormalized(SELECT_SONG_X, SELECT_SONG_Y, displayWidth, displayHeight);
                     state = State.WAIT_SONG_PAGE;
                     waitUntilMs = now + SELECT_TO_CONFIRM_DELAY_MS;
                     lastTapMs = now;
+                    selectVisibleFrames = 0;
                     Log.i(TAG, "select song detected");
                 } else if (now - lastTapMs >= continueIntervalMs) {
                     tapNormalized(CONTINUE_X, CONTINUE_Y, displayWidth, displayHeight);
@@ -122,6 +125,18 @@ public final class AutoContinueController {
         }
     }
 
+    private long detectionIntervalMs() {
+        return state == State.IDLE ? IDLE_DETECTION_INTERVAL_MS : RESULT_DETECTION_INTERVAL_MS;
+    }
+
+    private void updateSelectVisibleFrames(boolean visible) {
+        if (visible) {
+            selectVisibleFrames++;
+        } else {
+            selectVisibleFrames = 0;
+        }
+    }
+
     private void tapNormalized(double x, double y, int displayWidth, int displayHeight) {
         int tapX = (int) Math.round(x * displayWidth);
         int tapY = (int) Math.round(y * displayHeight);
@@ -139,7 +154,7 @@ public final class AutoContinueController {
 
     private boolean isSelectSongVisible(Bitmap frame) {
         return whiteRatio(frame, 0.655, 0.905, 0.762, 0.948) > 0.55
-                && darkRatio(frame, 0.64, 0.885, 0.78, 0.965) > 0.20;
+                && cyanRatio(frame, 0.78, 0.89, 0.92, 0.97) > 0.55;
     }
 
     private boolean isConfirmVisible(Bitmap frame) {
