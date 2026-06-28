@@ -64,6 +64,10 @@ public final class StatusOverlay {
         mainHandler.post(() -> showOnMain(statusText));
     }
 
+    public boolean isShown() {
+        return rootView != null;
+    }
+
     public void updateStatus(String statusText) {
         mainHandler.post(() -> {
             if (statusView != null) {

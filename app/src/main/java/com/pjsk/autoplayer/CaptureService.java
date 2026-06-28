@@ -504,7 +504,9 @@ public final class CaptureService extends Service {
     }
 
     private void updateVisibleStatus(String text, boolean alsoNotification) {
-        if (statusOverlay != null) {
+        if (statusOverlay == null || !statusOverlay.isShown()) {
+            showOverlay(text);
+        } else {
             statusOverlay.updateStatus(text);
         }
         if (alsoNotification) {
