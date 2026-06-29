@@ -34,6 +34,7 @@ public final class StatusOverlay {
     private LinearLayout contentView;
     private LinearLayout parameterView;
     private TextView statusTitleView;
+    private TextView autoContinueStatusView;
     private TextView statusView;
     private Button collapseButton;
     private Button detailsButton;
@@ -99,6 +100,16 @@ public final class StatusOverlay {
 
     public void setClickBlocked(boolean blocked) {
         mainHandler.post(() -> updateClickModeColor(blocked));
+    }
+
+    public void setAutoContinueStatus(String status) {
+        mainHandler.post(() -> {
+            if (autoContinueStatusView != null) {
+                String text = status == null ? "演奏歌曲" : status;
+                autoContinueStatusView.setText(text);
+                updateAutoContinueStatusColor(text);
+            }
+        });
     }
 
     public void setDebugDisplayEnabled(boolean enabled) {
@@ -179,6 +190,19 @@ public final class StatusOverlay {
                 0,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 1f));
+
+        autoContinueStatusView = new TextView(context);
+        autoContinueStatusView.setText("演奏歌曲");
+        autoContinueStatusView.setTextSize(12f);
+        autoContinueStatusView.setTypeface(Typeface.DEFAULT_BOLD);
+        autoContinueStatusView.setGravity(Gravity.CENTER);
+        autoContinueStatusView.setPadding(dp(8), 0, dp(8), 0);
+        updateAutoContinueStatusColor("演奏歌曲");
+        LinearLayout.LayoutParams autoStatusParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(28));
+        autoStatusParams.setMargins(0, 0, dp(6), 0);
+        header.addView(autoContinueStatusView, autoStatusParams);
 
         debugDisplayButton = makeSmallButton("调试显示");
         debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
@@ -301,6 +325,26 @@ public final class StatusOverlay {
         }
     }
 
+    private void updateAutoContinueStatusColor(String status) {
+        if (autoContinueStatusView == null) {
+            return;
+        }
+        int color;
+        if ("游戏结束".equals(status)) {
+            color = Color.rgb(255, 194, 87);
+        } else if ("选择歌曲".equals(status)) {
+            color = Color.rgb(120, 205, 255);
+        } else {
+            color = Color.rgb(94, 232, 142);
+        }
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(Color.argb(55, Color.red(color), Color.green(color), Color.blue(color)));
+        background.setCornerRadius(dp(7));
+        background.setStroke(dp(1), Color.argb(180, Color.red(color), Color.green(color), Color.blue(color)));
+        autoContinueStatusView.setTextColor(color);
+        autoContinueStatusView.setBackground(background);
+    }
+
     private void updateLayout() {
         if (windowManager != null && rootView != null && params != null) {
             try {
@@ -339,6 +383,7 @@ public final class StatusOverlay {
         contentView = null;
         parameterView = null;
         statusTitleView = null;
+        autoContinueStatusView = null;
         statusView = null;
         collapseButton = null;
         detailsButton = null;

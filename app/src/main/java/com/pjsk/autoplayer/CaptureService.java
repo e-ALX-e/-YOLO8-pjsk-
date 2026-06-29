@@ -443,6 +443,7 @@ public final class CaptureService extends Service {
             if (statusOverlay != null) {
                 statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
                 statusOverlay.setClickBlocked(isClickBlockedNow());
+                statusOverlay.setAutoContinueStatus(autoContinueStatusText());
             }
         }
 
@@ -547,7 +548,16 @@ public final class CaptureService extends Service {
         statusOverlay.setPreviewEnabled(AppSettings.isPreviewEnabled(this));
         statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
         statusOverlay.setClickBlocked(isClickBlockedNow());
+        statusOverlay.setAutoContinueStatus(autoContinueStatusText());
         statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
+    }
+
+    private String autoContinueStatusText() {
+        AutoContinueController controller = autoContinueController;
+        if (controller == null || !AppSettings.isAutoContinueEnabled(this)) {
+            return "演奏歌曲";
+        }
+        return controller.statusText();
     }
 
     private void toggleNoClickMode() {
