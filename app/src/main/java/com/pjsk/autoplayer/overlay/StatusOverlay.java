@@ -334,6 +334,8 @@ public final class StatusOverlay {
             color = Color.rgb(255, 194, 87);
         } else if ("选择歌曲".equals(status)) {
             color = Color.rgb(120, 205, 255);
+        } else if ("准备演奏".equals(status)) {
+            color = Color.rgb(197, 160, 255);
         } else {
             color = Color.rgb(94, 232, 142);
         }

@@ -51,9 +51,10 @@ public final class AutoContinueController {
             case State.GAME_ENDED:
                 return "游戏结束";
             case State.SELECT_SONG:
-            case State.CONFIRM_SENT:
                 return "选择歌曲";
+            case State.READY_TO_PLAY:
             case State.STARTING:
+                return "准备演奏";
             case State.PLAYING:
             default:
                 return "演奏歌曲";
@@ -89,7 +90,7 @@ public final class AutoContinueController {
                 break;
 
             case State.SELECT_SONG:
-            case State.CONFIRM_SENT:
+            case State.READY_TO_PLAY:
                 handleSongStart(frame, displayWidth, displayHeight, now);
                 break;
 
@@ -119,7 +120,7 @@ public final class AutoContinueController {
         }
 
         if (isTeamStartPageVisible(frame)) {
-            state = State.CONFIRM_SENT;
+            state = State.READY_TO_PLAY;
             lastTapMs = 0L;
             Log.i(TAG, "team start page detected");
             return;
@@ -140,6 +141,10 @@ public final class AutoContinueController {
     }
 
     private void handleSongStart(Bitmap frame, int displayWidth, int displayHeight, long now) {
+        if (isTeamStartPageVisible(frame)) {
+            state = State.READY_TO_PLAY;
+        }
+
         if (isStartVisible(frame)) {
             if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
                 tapNormalized("start", START_X, START_Y, displayWidth, displayHeight);
@@ -152,10 +157,9 @@ public final class AutoContinueController {
         }
 
         if (isSongSelectVisible(frame) && isConfirmVisible(frame)) {
-            state = State.SELECT_SONG;
             if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
                 tapNormalized("confirm", CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
-                state = State.CONFIRM_SENT;
+                state = State.READY_TO_PLAY;
                 lastTapMs = now;
                 Log.i(TAG, "song confirm detected");
             }
@@ -207,13 +211,14 @@ public final class AutoContinueController {
 
     private boolean isTeamStartPageVisible(Bitmap frame) {
         return darkRatio(frame, 0.58, 0.08, 0.90, 0.95) > 0.45
-                && cyanRatio(frame, 0.724, 0.718, 0.763, 0.795) > 0.35;
+                && greenRatio(frame, 0.724, 0.718, 0.763, 0.795) > 0.25
+                && darkRatio(frame, 0.505, 0.235, 0.655, 0.435) > 0.25;
     }
 
     private boolean isStartVisible(Bitmap frame) {
         return isTeamStartPageVisible(frame)
-                && cyanRatio(frame, 0.725, 0.715, 0.755, 0.79) > 0.35
-                && darkRatio(frame, 0.725, 0.715, 0.755, 0.79) < 0.12;
+                && greenRatio(frame, 0.724, 0.718, 0.763, 0.795) > 0.25
+                && darkRatio(frame, 0.724, 0.718, 0.763, 0.795) < 0.08;
     }
 
     private double whiteRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -274,7 +279,7 @@ public final class AutoContinueController {
         static final int PLAYING = 0;
         static final int GAME_ENDED = 1;
         static final int SELECT_SONG = 2;
-        static final int CONFIRM_SENT = 3;
+        static final int READY_TO_PLAY = 3;
         static final int STARTING = 4;
 
         private State() {
