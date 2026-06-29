@@ -143,6 +143,7 @@ public final class CaptureService extends Service {
 
         stopEverything();
         running = true;
+        AppSettings.ensureAutoContinueDefaultEnabled(this);
 
         detector = new NcnnDetector(this);
         detectorStatus = detector.status();

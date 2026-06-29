@@ -11,6 +11,7 @@ public final class AppSettings {
     private static final String KEY_NO_CLICK_MODE = "no_click_mode";
     private static final String KEY_DEBUG_DISPLAY_ENABLED = "debug_display_enabled";
     private static final String KEY_AUTO_CONTINUE_ENABLED = "auto_continue_enabled";
+    private static final String KEY_AUTO_CONTINUE_DEFAULT_APPLIED = "auto_continue_default_applied";
     private static final String KEY_ACTION_Y = "action_y";
     private static final String KEY_TOUCH_MAPPING_MODE = "touch_mapping_mode";
 
@@ -49,11 +50,22 @@ public final class AppSettings {
     }
 
     public static boolean isAutoContinueEnabled(Context context) {
-        return prefs(context).getBoolean(KEY_AUTO_CONTINUE_ENABLED, false);
+        return prefs(context).getBoolean(KEY_AUTO_CONTINUE_ENABLED, true);
     }
 
     public static void setAutoContinueEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_AUTO_CONTINUE_ENABLED, enabled).apply();
+    }
+
+    public static void ensureAutoContinueDefaultEnabled(Context context) {
+        SharedPreferences preferences = prefs(context);
+        if (preferences.getBoolean(KEY_AUTO_CONTINUE_DEFAULT_APPLIED, false)) {
+            return;
+        }
+        preferences.edit()
+                .putBoolean(KEY_AUTO_CONTINUE_ENABLED, true)
+                .putBoolean(KEY_AUTO_CONTINUE_DEFAULT_APPLIED, true)
+                .apply();
     }
 
     public static double getActionY(Context context) {

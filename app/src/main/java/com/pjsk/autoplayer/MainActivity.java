@@ -42,6 +42,7 @@ public final class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2001);
         }
+        AppSettings.ensureAutoContinueDefaultEnabled(this);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -278,7 +279,7 @@ public final class MainActivity extends Activity {
         Button up = new Button(this);
         up.setText("上移");
         up.setAllCaps(false);
-        up.setOnClickListener(v -> adjustActionY(-2.0));
+        up.setOnClickListener(v -> adjustActionY(-1.0));
         row.addView(up, new LinearLayout.LayoutParams(0, dp(42), 1f));
 
         Button reset = new Button(this);
@@ -296,7 +297,7 @@ public final class MainActivity extends Activity {
         Button down = new Button(this);
         down.setText("下移");
         down.setAllCaps(false);
-        down.setOnClickListener(v -> adjustActionY(2.0));
+        down.setOnClickListener(v -> adjustActionY(1.0));
         row.addView(down, new LinearLayout.LayoutParams(0, dp(42), 1f));
 
         LinearLayout.LayoutParams rowParams = matchWrap();

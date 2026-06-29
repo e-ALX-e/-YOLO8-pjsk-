@@ -14,7 +14,7 @@ public final class Config {
 
     public static final double ACTION_Y_MIN = 190.0;
     public static final double ACTION_Y_MAX = 310.0;
-    public static final double ACTION_Y_DEFAULT = 260.0;
+    public static final double ACTION_Y_DEFAULT = 267.0;
     public static final double ACTION_Y = ACTION_Y_DEFAULT;
     public static final double CLICK_LINE_MARGIN = 28.0;
     public static final double HOLD_Y = 265.0;
