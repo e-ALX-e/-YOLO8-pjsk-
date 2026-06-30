@@ -15,6 +15,7 @@ public final class AutoContinueController {
     private static final long CONTINUE_TAP_REPEAT_MS = 500;
     private static final long PAGE_TAP_REPEAT_MS = 900;
     private static final long CONFIRM_TAP_REPEAT_MS = 500;
+    private static final long CONFIRM_VISIBLE_STABLE_MS = 350;
     private static final long STARTING_SUPPRESS_MS = 2500;
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
@@ -31,6 +32,7 @@ public final class AutoContinueController {
     private long lastDetectMs;
     private long lastTapMs;
     private long waitUntilMs;
+    private long songSelectVisibleSinceMs;
     private boolean soloLiveSeen;
 
     public AutoContinueController(TouchInjector injector) {
@@ -42,6 +44,7 @@ public final class AutoContinueController {
         lastDetectMs = 0L;
         lastTapMs = 0L;
         waitUntilMs = 0L;
+        songSelectVisibleSinceMs = 0L;
         soloLiveSeen = false;
     }
 
@@ -130,6 +133,7 @@ public final class AutoContinueController {
         if (state == State.GAME_ENDED) {
             if (soloLiveSeen && isSongSelectVisible(frame)) {
                 state = State.SELECT_SONG;
+                songSelectVisibleSinceMs = 0L;
                 lastTapMs = 0L;
                 Log.i(TAG, "page correction: song select");
             }
@@ -145,6 +149,7 @@ public final class AutoContinueController {
                 Log.i(TAG, "page correction: result detail");
             } else if (isTeamStartPageVisible(frame)) {
                 state = State.READY_TO_PLAY;
+                songSelectVisibleSinceMs = 0L;
                 lastTapMs = 0L;
                 Log.i(TAG, "page correction: ready to play");
             }
@@ -158,6 +163,7 @@ public final class AutoContinueController {
                 Log.i(TAG, "page correction: result detail");
             } else if (isSongSelectVisible(frame)) {
                 state = State.SELECT_SONG;
+                songSelectVisibleSinceMs = 0L;
                 lastTapMs = 0L;
                 Log.i(TAG, "page correction: song select");
             }
@@ -175,6 +181,7 @@ public final class AutoContinueController {
 
         if (soloLiveSeen && isSongSelectVisible(frame)) {
             state = State.SELECT_SONG;
+            songSelectVisibleSinceMs = now;
             lastTapMs = 0L;
             Log.i(TAG, "song select page detected");
             return;
@@ -213,6 +220,7 @@ public final class AutoContinueController {
 
         if (isTeamStartPageVisible(frame)) {
             state = State.READY_TO_PLAY;
+            songSelectVisibleSinceMs = 0L;
         }
 
         if (isStartVisible(frame)) {
@@ -227,16 +235,31 @@ public final class AutoContinueController {
         }
 
         boolean songSelectVisible = isSongSelectVisible(frame);
+        boolean confirmVisible = isConfirmVisible(frame);
         if (songSelectVisible) {
-            state = State.SELECT_SONG;
+            if (state != State.SELECT_SONG && state != State.CONFIRMING_SONG) {
+                songSelectVisibleSinceMs = now;
+            } else if (songSelectVisibleSinceMs == 0L) {
+                songSelectVisibleSinceMs = now;
+            }
+            if (state != State.CONFIRMING_SONG) {
+                state = State.SELECT_SONG;
+            }
+        } else if ((state == State.SELECT_SONG || state == State.CONFIRMING_SONG)
+                && confirmVisible
+                && songSelectVisibleSinceMs == 0L) {
+            songSelectVisibleSinceMs = now;
         }
 
-        if ((state == State.SELECT_SONG || state == State.CONFIRMING_SONG) && songSelectVisible) {
+        if ((state == State.SELECT_SONG || state == State.CONFIRMING_SONG)
+                && (songSelectVisible || confirmVisible)
+                && now - songSelectVisibleSinceMs >= CONFIRM_VISIBLE_STABLE_MS
+                && confirmVisible) {
             if (now - lastTapMs >= CONFIRM_TAP_REPEAT_MS) {
                 tapNormalized("confirm", CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
                 state = State.CONFIRMING_SONG;
                 lastTapMs = now;
-                Log.i(TAG, "song select page visible, retrying confirm");
+                Log.i(TAG, "confirm button visible, tapping confirm");
             }
         }
     }
