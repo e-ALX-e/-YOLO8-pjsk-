@@ -30,6 +30,7 @@ public final class AutoContinueController {
     private long lastDetectMs;
     private long lastTapMs;
     private long waitUntilMs;
+    private boolean soloLiveSeen;
 
     public AutoContinueController(TouchInjector injector) {
         this.injector = injector;
@@ -40,6 +41,7 @@ public final class AutoContinueController {
         lastDetectMs = 0L;
         lastTapMs = 0L;
         waitUntilMs = 0L;
+        soloLiveSeen = false;
     }
 
     public boolean shouldSuppressGameRecognition() {
@@ -110,6 +112,7 @@ public final class AutoContinueController {
         if (isLiveClear(frame)) {
             state = State.GAME_ENDED;
             lastTapMs = 0L;
+            soloLiveSeen = false;
             Log.i(TAG, "LIVE CLEAR detected");
         }
     }
@@ -118,24 +121,35 @@ public final class AutoContinueController {
         if (state == State.STARTING) {
             return;
         }
-        if (isResultDetailVisible(frame)) {
-            if (state != State.GAME_ENDED) {
-                state = State.GAME_ENDED;
+
+        if (state == State.GAME_ENDED) {
+            if (soloLiveSeen && isSongSelectVisible(frame)) {
+                state = State.SELECT_SONG;
                 lastTapMs = 0L;
-                Log.i(TAG, "page correction: result detail");
+                Log.i(TAG, "page correction: song select");
             }
             return;
         }
-        if (isTeamStartPageVisible(frame)) {
-            if (state != State.READY_TO_PLAY) {
+
+        if (state == State.SELECT_SONG) {
+            if (isResultDetailVisible(frame)) {
+                state = State.GAME_ENDED;
+                lastTapMs = 0L;
+                Log.i(TAG, "page correction: result detail");
+            } else if (isTeamStartPageVisible(frame)) {
                 state = State.READY_TO_PLAY;
                 lastTapMs = 0L;
                 Log.i(TAG, "page correction: ready to play");
             }
             return;
         }
-        if (isSongSelectVisible(frame)) {
-            if (state != State.SELECT_SONG) {
+
+        if (state == State.READY_TO_PLAY) {
+            if (isResultDetailVisible(frame)) {
+                state = State.GAME_ENDED;
+                lastTapMs = 0L;
+                Log.i(TAG, "page correction: result detail");
+            } else if (isSongSelectVisible(frame)) {
                 state = State.SELECT_SONG;
                 lastTapMs = 0L;
                 Log.i(TAG, "page correction: song select");
@@ -152,21 +166,15 @@ public final class AutoContinueController {
             return;
         }
 
-        if (isSongSelectVisible(frame)) {
+        if (soloLiveSeen && isSongSelectVisible(frame)) {
             state = State.SELECT_SONG;
             lastTapMs = 0L;
             Log.i(TAG, "song select page detected");
             return;
         }
 
-        if (isTeamStartPageVisible(frame)) {
-            state = State.READY_TO_PLAY;
-            lastTapMs = 0L;
-            Log.i(TAG, "team start page detected");
-            return;
-        }
-
         if (isSoloLiveVisible(frame)) {
+            soloLiveSeen = true;
             if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
                 tapNormalized("solo", SOLO_LIVE_X, SOLO_LIVE_Y, displayWidth, displayHeight);
                 lastTapMs = now;
@@ -205,7 +213,6 @@ public final class AutoContinueController {
         if (isSongSelectVisible(frame) && isConfirmVisible(frame)) {
             if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
                 tapNormalized("confirm", CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
-                state = State.READY_TO_PLAY;
                 lastTapMs = now;
                 Log.i(TAG, "song confirm detected");
             }
