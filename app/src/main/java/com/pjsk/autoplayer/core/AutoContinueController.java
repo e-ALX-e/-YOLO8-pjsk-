@@ -18,6 +18,8 @@ public final class AutoContinueController {
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
     private static final double RESULT_CONTINUE_Y = 800.0 / 887.0;
+    private static final double RESULT_SELECT_SONG_X = 1365.0 / 1920.0;
+    private static final double RESULT_SELECT_SONG_Y = 820.0 / 887.0;
     private static final double SOLO_LIVE_X = 1118.0 / 1920.0;
     private static final double SOLO_LIVE_Y = 305.0 / 887.0;
     private static final double CONFIRM_X = 1415.0 / 1920.0;
@@ -75,6 +77,9 @@ public final class AutoContinueController {
         }
 
         long now = SystemClock.elapsedRealtime();
+        if (state != State.PLAYING) {
+            correctStateFromVisiblePage(frame);
+        }
         if (now - lastDetectMs < detectionIntervalMs()) {
             return;
         }
@@ -111,7 +116,49 @@ public final class AutoContinueController {
         }
     }
 
+    private void correctStateFromVisiblePage(Bitmap frame) {
+        if (state == State.STARTING) {
+            return;
+        }
+        if (isResultDetailVisible(frame)) {
+            if (state != State.GAME_ENDED) {
+                state = State.GAME_ENDED;
+                lastTapMs = 0L;
+                Log.i(TAG, "page correction: result detail");
+            }
+            return;
+        }
+        if (isTeamStartPageVisible(frame)) {
+            if (state != State.READY_TO_PLAY) {
+                state = State.READY_TO_PLAY;
+                lastTapMs = 0L;
+                Log.i(TAG, "page correction: ready to play");
+            }
+            return;
+        }
+        if (isSongSelectVisible(frame)) {
+            if (state != State.SELECT_SONG) {
+                state = State.SELECT_SONG;
+                lastTapMs = 0L;
+                Log.i(TAG, "page correction: song select");
+            }
+        }
+    }
+
     private void handleGameEnded(Bitmap frame, int displayWidth, int displayHeight, long now) {
+        if (isResultDetailVisible(frame)) {
+            if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
+                tapNormalized(
+                        "result_select_song",
+                        RESULT_SELECT_SONG_X,
+                        RESULT_SELECT_SONG_Y,
+                        displayWidth,
+                        displayHeight);
+                lastTapMs = now;
+            }
+            return;
+        }
+
         if (isSongSelectVisible(frame)) {
             state = State.SELECT_SONG;
             lastTapMs = 0L;
@@ -141,6 +188,12 @@ public final class AutoContinueController {
     }
 
     private void handleSongStart(Bitmap frame, int displayWidth, int displayHeight, long now) {
+        if (isResultDetailVisible(frame)) {
+            state = State.GAME_ENDED;
+            lastTapMs = 0L;
+            return;
+        }
+
         if (isTeamStartPageVisible(frame)) {
             state = State.READY_TO_PLAY;
         }
@@ -201,12 +254,19 @@ public final class AutoContinueController {
     private boolean isSongSelectVisible(Bitmap frame) {
         return whiteRatio(frame, 0.14, 0.03, 0.46, 0.09) > 0.50
                 && cyanRatio(frame, 0.17, 0.13, 0.51, 0.60) > 0.30
-                && darkRatio(frame, 0.58, 0.08, 0.90, 0.95) > 0.45;
+                && darkRatio(frame, 0.58, 0.08, 0.90, 0.95) > 0.45
+                && greenRatio(frame, 0.724, 0.718, 0.763, 0.795) < 0.22;
     }
 
     private boolean isConfirmVisible(Bitmap frame) {
         return cyanRatio(frame, 0.69, 0.78, 0.785, 0.855) > 0.08
                 && darkRatio(frame, 0.69, 0.78, 0.785, 0.855) < 0.15;
+    }
+
+    private boolean isResultDetailVisible(Bitmap frame) {
+        return whiteRatio(frame, 0.65, 0.895, 0.77, 0.955) > 0.45
+                && cyanRatio(frame, 0.78, 0.895, 0.92, 0.965) > 0.65
+                && whiteRatio(frame, 0.14, 0.03, 0.46, 0.09) < 0.20;
     }
 
     private boolean isTeamStartPageVisible(Bitmap frame) {
