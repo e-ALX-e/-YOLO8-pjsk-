@@ -52,6 +52,7 @@ public final class AutoContinueController {
         switch (state) {
             case State.GAME_ENDED:
                 return "游戏结束";
+            case State.WAIT_SONG_SELECT:
             case State.SELECT_SONG:
                 return "选择歌曲";
             case State.READY_TO_PLAY:
@@ -94,6 +95,7 @@ public final class AutoContinueController {
                 handleGameEnded(frame, displayWidth, displayHeight, now);
                 break;
 
+            case State.WAIT_SONG_SELECT:
             case State.SELECT_SONG:
             case State.READY_TO_PLAY:
                 handleSongStart(frame, displayWidth, displayHeight, now);
@@ -131,7 +133,7 @@ public final class AutoContinueController {
             return;
         }
 
-        if (state == State.SELECT_SONG) {
+        if (state == State.WAIT_SONG_SELECT || state == State.SELECT_SONG) {
             if (isResultDetailVisible(frame)) {
                 state = State.GAME_ENDED;
                 lastTapMs = 0L;
@@ -177,6 +179,7 @@ public final class AutoContinueController {
             soloLiveSeen = true;
             if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
                 tapNormalized("solo", SOLO_LIVE_X, SOLO_LIVE_Y, displayWidth, displayHeight);
+                state = State.WAIT_SONG_SELECT;
                 lastTapMs = now;
             }
             return;
@@ -195,6 +198,14 @@ public final class AutoContinueController {
             return;
         }
 
+        if (state == State.WAIT_SONG_SELECT && isSoloLiveVisible(frame)) {
+            if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
+                tapNormalized("solo_retry", SOLO_LIVE_X, SOLO_LIVE_Y, displayWidth, displayHeight);
+                lastTapMs = now;
+            }
+            return;
+        }
+
         if (isTeamStartPageVisible(frame)) {
             state = State.READY_TO_PLAY;
         }
@@ -210,7 +221,11 @@ public final class AutoContinueController {
             return;
         }
 
-        if (isSongSelectVisible(frame) && isConfirmVisible(frame)) {
+        if (isSongSelectVisible(frame)) {
+            state = State.SELECT_SONG;
+        }
+
+        if (state == State.SELECT_SONG && isConfirmVisible(frame)) {
             if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
                 tapNormalized("confirm", CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
                 lastTapMs = now;
@@ -340,9 +355,10 @@ public final class AutoContinueController {
     private static final class State {
         static final int PLAYING = 0;
         static final int GAME_ENDED = 1;
-        static final int SELECT_SONG = 2;
-        static final int READY_TO_PLAY = 3;
-        static final int STARTING = 4;
+        static final int WAIT_SONG_SELECT = 2;
+        static final int SELECT_SONG = 3;
+        static final int READY_TO_PLAY = 4;
+        static final int STARTING = 5;
 
         private State() {
         }
