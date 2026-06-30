@@ -18,8 +18,6 @@ public final class AutoContinueController {
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
     private static final double RESULT_CONTINUE_Y = 800.0 / 887.0;
-    private static final double RESULT_SELECT_SONG_X = 1365.0 / 1920.0;
-    private static final double RESULT_SELECT_SONG_Y = 820.0 / 887.0;
     private static final double SOLO_LIVE_X = 1118.0 / 1920.0;
     private static final double SOLO_LIVE_Y = 305.0 / 887.0;
     private static final double CONFIRM_X = 1415.0 / 1920.0;
@@ -148,12 +146,7 @@ public final class AutoContinueController {
     private void handleGameEnded(Bitmap frame, int displayWidth, int displayHeight, long now) {
         if (isResultDetailVisible(frame)) {
             if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
-                tapNormalized(
-                        "result_select_song",
-                        RESULT_SELECT_SONG_X,
-                        RESULT_SELECT_SONG_Y,
-                        displayWidth,
-                        displayHeight);
+                tapNormalized("result_ok", RESULT_CONTINUE_X, RESULT_CONTINUE_Y, displayWidth, displayHeight);
                 lastTapMs = now;
             }
             return;
@@ -255,7 +248,9 @@ public final class AutoContinueController {
         return whiteRatio(frame, 0.14, 0.03, 0.46, 0.09) > 0.50
                 && cyanRatio(frame, 0.17, 0.13, 0.51, 0.60) > 0.30
                 && darkRatio(frame, 0.58, 0.08, 0.90, 0.95) > 0.45
-                && greenRatio(frame, 0.724, 0.718, 0.763, 0.795) < 0.22;
+                && greenRatio(frame, 0.724, 0.718, 0.763, 0.795) < 0.22
+                && cyanRatio(frame, 0.685, 0.765, 0.79, 0.86) > 0.12
+                && darkRatio(frame, 0.67, 0.875, 0.79, 0.955) > 0.40;
     }
 
     private boolean isConfirmVisible(Bitmap frame) {
