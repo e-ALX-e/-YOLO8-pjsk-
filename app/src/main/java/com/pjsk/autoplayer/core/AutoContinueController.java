@@ -17,6 +17,7 @@ public final class AutoContinueController {
     private static final long CONFIRM_TAP_REPEAT_MS = 500;
     private static final long CONFIRM_VISIBLE_STABLE_MS = 350;
     private static final long STARTING_SUPPRESS_MS = 2500;
+    private static final long GAME_END_AFTER_START_GUARD_MS = 10000;
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
     private static final double RESULT_CONTINUE_Y = 800.0 / 887.0;
@@ -33,6 +34,7 @@ public final class AutoContinueController {
     private long lastTapMs;
     private long waitUntilMs;
     private long songSelectVisibleSinceMs;
+    private long liveClearBlockedUntilMs;
     private boolean soloLiveSeen;
 
     public AutoContinueController(TouchInjector injector) {
@@ -45,6 +47,7 @@ public final class AutoContinueController {
         lastTapMs = 0L;
         waitUntilMs = 0L;
         songSelectVisibleSinceMs = 0L;
+        liveClearBlockedUntilMs = 0L;
         soloLiveSeen = false;
     }
 
@@ -93,7 +96,7 @@ public final class AutoContinueController {
 
         switch (state) {
             case State.PLAYING:
-                detectGameEndOnly(frame);
+                detectGameEndOnly(frame, now);
                 break;
 
             case State.GAME_ENDED:
@@ -109,17 +112,26 @@ public final class AutoContinueController {
 
             case State.STARTING:
                 if (now >= waitUntilMs) {
-                    reset();
-                    Log.i(TAG, "game recognition resumed");
+                    state = State.PLAYING;
+                    lastDetectMs = now;
+                    lastTapMs = 0L;
+                    waitUntilMs = 0L;
+                    songSelectVisibleSinceMs = 0L;
+                    soloLiveSeen = false;
+                    Log.i(TAG, "game recognition resumed, live clear guarded");
                 }
                 break;
         }
     }
 
-    private void detectGameEndOnly(Bitmap frame) {
+    private void detectGameEndOnly(Bitmap frame, long now) {
+        if (now < liveClearBlockedUntilMs) {
+            return;
+        }
         if (isLiveClear(frame)) {
             state = State.GAME_ENDED;
             lastTapMs = 0L;
+            liveClearBlockedUntilMs = 0L;
             soloLiveSeen = false;
             Log.i(TAG, "LIVE CLEAR detected");
         }
@@ -229,6 +241,7 @@ public final class AutoContinueController {
                 state = State.STARTING;
                 lastTapMs = now;
                 waitUntilMs = now + STARTING_SUPPRESS_MS;
+                liveClearBlockedUntilMs = waitUntilMs + GAME_END_AFTER_START_GUARD_MS;
                 Log.i(TAG, "start button detected");
             }
             return;
