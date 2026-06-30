@@ -221,18 +221,17 @@ public final class AutoContinueController {
             return;
         }
 
-        if (isSongSelectVisible(frame)) {
+        boolean songSelectVisible = isSongSelectVisible(frame);
+        if (songSelectVisible) {
             state = State.SELECT_SONG;
         }
 
-        if (state == State.SELECT_SONG) {
+        if (state == State.SELECT_SONG && songSelectVisible) {
             if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
-                if (isConfirmVisible(frame)) {
-                    tapNormalized("confirm", CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
-                    state = State.READY_TO_PLAY;
-                    lastTapMs = now;
-                    Log.i(TAG, "song confirm detected");
-                }
+                tapNormalized("confirm", CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
+                state = State.READY_TO_PLAY;
+                lastTapMs = now;
+                Log.i(TAG, "song select page confirmed, tapping confirm");
             }
         }
     }
@@ -270,10 +269,11 @@ public final class AutoContinueController {
     }
 
     private boolean isSongSelectVisible(Bitmap frame) {
-        return whiteRatio(frame, 0.14, 0.03, 0.46, 0.09) > 0.50
+        return (whiteRatio(frame, 0.14, 0.03, 0.46, 0.09) > 0.45
+                    || darkRatio(frame, 0.67, 0.875, 0.79, 0.955) > 0.40)
                 && darkRatio(frame, 0.58, 0.08, 0.90, 0.95) > 0.45
                 && greenRatio(frame, 0.724, 0.718, 0.763, 0.795) < 0.22
-                && darkRatio(frame, 0.67, 0.875, 0.79, 0.955) > 0.40;
+                && darkRatio(frame, 0.67, 0.875, 0.79, 0.955) > 0.35;
     }
 
     private boolean isConfirmVisible(Bitmap frame) {
