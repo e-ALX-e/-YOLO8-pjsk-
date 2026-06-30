@@ -14,6 +14,7 @@ public final class AutoContinueController {
     private static final long ACTIVE_DETECTION_INTERVAL_MS = 250;
     private static final long CONTINUE_TAP_REPEAT_MS = 500;
     private static final long PAGE_TAP_REPEAT_MS = 900;
+    private static final long CONFIRM_TAP_REPEAT_MS = 500;
     private static final long STARTING_SUPPRESS_MS = 2500;
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
@@ -54,6 +55,7 @@ public final class AutoContinueController {
                 return "游戏结束";
             case State.WAIT_SONG_SELECT:
             case State.SELECT_SONG:
+            case State.CONFIRMING_SONG:
                 return "选择歌曲";
             case State.READY_TO_PLAY:
             case State.STARTING:
@@ -97,6 +99,7 @@ public final class AutoContinueController {
 
             case State.WAIT_SONG_SELECT:
             case State.SELECT_SONG:
+            case State.CONFIRMING_SONG:
             case State.READY_TO_PLAY:
                 handleSongStart(frame, displayWidth, displayHeight, now);
                 break;
@@ -133,7 +136,9 @@ public final class AutoContinueController {
             return;
         }
 
-        if (state == State.WAIT_SONG_SELECT || state == State.SELECT_SONG) {
+        if (state == State.WAIT_SONG_SELECT
+                || state == State.SELECT_SONG
+                || state == State.CONFIRMING_SONG) {
             if (isResultDetailVisible(frame)) {
                 state = State.GAME_ENDED;
                 lastTapMs = 0L;
@@ -226,12 +231,12 @@ public final class AutoContinueController {
             state = State.SELECT_SONG;
         }
 
-        if (state == State.SELECT_SONG && songSelectVisible) {
-            if (now - lastTapMs >= PAGE_TAP_REPEAT_MS) {
+        if ((state == State.SELECT_SONG || state == State.CONFIRMING_SONG) && songSelectVisible) {
+            if (now - lastTapMs >= CONFIRM_TAP_REPEAT_MS) {
                 tapNormalized("confirm", CONFIRM_X, CONFIRM_Y, displayWidth, displayHeight);
-                state = State.READY_TO_PLAY;
+                state = State.CONFIRMING_SONG;
                 lastTapMs = now;
-                Log.i(TAG, "song select page confirmed, tapping confirm");
+                Log.i(TAG, "song select page visible, retrying confirm");
             }
         }
     }
@@ -359,8 +364,9 @@ public final class AutoContinueController {
         static final int GAME_ENDED = 1;
         static final int WAIT_SONG_SELECT = 2;
         static final int SELECT_SONG = 3;
-        static final int READY_TO_PLAY = 4;
-        static final int STARTING = 5;
+        static final int CONFIRMING_SONG = 4;
+        static final int READY_TO_PLAY = 5;
+        static final int STARTING = 6;
 
         private State() {
         }
