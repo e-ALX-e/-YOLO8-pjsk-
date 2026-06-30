@@ -268,16 +268,16 @@ public final class AutoContinueController {
 
     private boolean isSongSelectVisible(Bitmap frame) {
         return whiteRatio(frame, 0.14, 0.03, 0.46, 0.09) > 0.50
-                && cyanRatio(frame, 0.17, 0.13, 0.51, 0.60) > 0.30
                 && darkRatio(frame, 0.58, 0.08, 0.90, 0.95) > 0.45
                 && greenRatio(frame, 0.724, 0.718, 0.763, 0.795) < 0.22
-                && cyanRatio(frame, 0.685, 0.765, 0.79, 0.86) > 0.12
+                && isConfirmVisible(frame)
                 && darkRatio(frame, 0.67, 0.875, 0.79, 0.955) > 0.40;
     }
 
     private boolean isConfirmVisible(Bitmap frame) {
-        return cyanRatio(frame, 0.69, 0.78, 0.785, 0.855) > 0.08
-                && darkRatio(frame, 0.69, 0.78, 0.785, 0.855) < 0.15;
+        return cyanRatio(frame, 0.685, 0.765, 0.79, 0.86) > 0.12
+                && greenRatio(frame, 0.685, 0.765, 0.79, 0.86) > 0.10
+                && darkRatio(frame, 0.685, 0.765, 0.79, 0.86) < 0.35;
     }
 
     private boolean isResultDetailVisible(Bitmap frame) {
