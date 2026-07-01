@@ -37,6 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class CaptureService extends Service {
+    // 外部通过这些 action 控制服务：开始录屏、停止服务、开关识别预览窗口。
     public static final String ACTION_START = "com.pjsk.autoplayer.START";
     public static final String ACTION_STOP = "com.pjsk.autoplayer.STOP";
     public static final String ACTION_SET_PREVIEW = "com.pjsk.autoplayer.SET_PREVIEW";
@@ -50,11 +51,14 @@ public final class CaptureService extends Service {
     private static final long OVERLAY_UPDATE_INTERVAL_MS = 1000;
     private static final long NOTIFICATION_UPDATE_INTERVAL_MS = 3000;
     private static final long FPS_WINDOW_MS = 1000;
+    // 从“不点击模式”恢复到点击模式时，延迟 5 秒再真正允许点击。
     private static final long CLICK_RESUME_DELAY_MS = 5000;
 
     private static volatile boolean running;
 
+    // 所有帧处理都串行放到单线程，避免识别、点击和 UI 更新同时抢状态。
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    // processing 用来丢弃还没处理完时到来的新帧，防止排队导致延迟越来越大。
     private final AtomicBoolean processing = new AtomicBoolean(false);
     private final Object metricsLock = new Object();
 
@@ -66,6 +70,7 @@ public final class CaptureService extends Service {
     private StatusOverlay statusOverlay;
     private DetectionPreviewOverlay previewOverlay;
 
+    // FPS 统计使用滑动窗口：只统计最近 1 秒内处理/丢弃的帧。
     private volatile int totalFrames;
     private volatile int totalDroppedFrames;
     private final Deque<Long> frameTimesMs = new ArrayDeque<>();
@@ -93,6 +98,7 @@ public final class CaptureService extends Service {
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
+        // 录屏服务必须以前台服务运行，否则系统可能停止 MediaProjection。
         Notification notification = buildNotification("等待录屏授权");
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(
@@ -111,12 +117,14 @@ public final class CaptureService extends Service {
         }
 
         String action = intent.getAction();
+        // 停止服务：释放录屏、识别器、触摸注入器和悬浮窗。
         if (ACTION_STOP.equals(action)) {
             stopEverything();
             stopSelf();
             return START_NOT_STICKY;
         }
 
+        // 只切换预览小窗口，不重启录屏。
         if (ACTION_SET_PREVIEW.equals(action)) {
             setPreviewEnabled(intent.getBooleanExtra(
                     EXTRA_PREVIEW_ENABLED,
@@ -124,6 +132,7 @@ public final class CaptureService extends Service {
             return running ? START_STICKY : START_NOT_STICKY;
         }
 
+        // 开始录屏：使用 MainActivity 传入的录屏授权结果。
         if (ACTION_START.equals(action)) {
             int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
             Intent resultData = intent.getParcelableExtra(EXTRA_RESULT_DATA);
@@ -135,6 +144,7 @@ public final class CaptureService extends Service {
     }
 
     private void startCapture(int resultCode, Intent resultData) {
+        // 没有授权数据就不能创建 MediaProjection。
         if (resultData == null) {
             Log.e(TAG, "missing MediaProjection result data");
             updateNotification("启动失败：缺少录屏授权");
@@ -145,6 +155,7 @@ public final class CaptureService extends Service {
         running = true;
         AppSettings.ensureAutoContinueDefaultEnabled(this);
 
+        // 启动核心组件：模型识别、root 点击、音符自动操作、自动继续状态机。
         detector = new NcnnDetector(this);
         detectorStatus = detector.status();
         Log.i(TAG, "detector status: " + detectorStatus);
@@ -157,6 +168,7 @@ public final class CaptureService extends Service {
         showOverlay("启动中\n模型：" + detectorStatus);
         setPreviewEnabled(AppSettings.isPreviewEnabled(this));
 
+        // 通过系统服务拿到录屏投影。
         MediaProjectionManager manager =
                 (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
         if (manager == null) {
@@ -175,6 +187,7 @@ public final class CaptureService extends Service {
         captureSource = new ScreenCaptureSource(this, projection, new ScreenCaptureSource.Listener() {
             @Override
             public boolean shouldCaptureFrame() {
+                // 上一帧没处理完时直接丢帧，避免延迟堆积。
                 if (processing.compareAndSet(false, true)) {
                     return true;
                 }
@@ -184,6 +197,7 @@ public final class CaptureService extends Service {
 
             @Override
             public void onFrame(ScreenCaptureSource.Frame frame) {
+                // 录屏回调线程只分发任务，真正处理放到 worker 单线程。
                 worker.execute(() -> processFrame(frame));
             }
 
@@ -208,6 +222,7 @@ public final class CaptureService extends Service {
                 return;
             }
 
+            // 自动继续先看画面；如果正在接管流程，就暂停普通音符识别。
             long autoContinueStartMs = SystemClock.elapsedRealtime();
             runAutoContinue(frame);
             long autoContinueMs = Math.max(0L, SystemClock.elapsedRealtime() - autoContinueStartMs);
@@ -216,9 +231,11 @@ public final class CaptureService extends Service {
                 return;
             }
 
+            // 普通演奏状态：运行 NCNN 模型识别音符。
             long detectStartMs = SystemClock.elapsedRealtime();
             List<Detection> detections = currentDetector.detect(frame.bitmap);
             long detectMs = Math.max(0L, SystemClock.elapsedRealtime() - detectStartMs);
+            // 判定线位置和点击模式每帧读取设置，方便悬浮窗实时调整。
             double actionYBase = AppSettings.getActionY(this);
             currentAutoPlayer.setActionYBase(actionYBase);
             updateClickMode(currentAutoPlayer);
@@ -232,10 +249,12 @@ public final class CaptureService extends Service {
             updateRuntimeStatus(detectionCount);
             long statusMs = Math.max(0L, SystemClock.elapsedRealtime() - statusStartMs);
 
+            // 小预览窗口只显示识别情况，不参与点击决策。
             long previewStartMs = SystemClock.elapsedRealtime();
             updatePreview(frame, detections, inferenceMs, actionYBase);
             long previewMs = Math.max(0L, SystemClock.elapsedRealtime() - previewStartMs);
 
+            // 根据模型识别结果执行 tap/hold/flick。
             long actionStartMs = SystemClock.elapsedRealtime();
             currentAutoPlayer.onFrame(
                     detections,
@@ -249,6 +268,7 @@ public final class CaptureService extends Service {
 
             long now = SystemClock.elapsedRealtime();
             if (now - lastDiagnosticsLogMs >= 1000) {
+                // 每秒输出一次耗时日志，用来定位 FPS 瓶颈。
                 lastDiagnosticsLogMs = now;
                 Log.i(TAG, "frame=" + frame.width + "x" + frame.height
                         + " display=" + frame.displayWidth + "x" + frame.displayHeight
@@ -278,12 +298,14 @@ public final class CaptureService extends Service {
             Log.e(TAG, "process frame failed", t);
             updateVisibleStatus("处理异常：" + t.getClass().getSimpleName(), true);
         } finally {
+            // 必须释放帧并清除 processing，否则后续帧会一直被丢弃。
             frame.close();
             processing.set(false);
         }
     }
 
     private void runAutoContinue(ScreenCaptureSource.Frame frame) {
+        // 自动继续只依赖原始截图和显示尺寸，不依赖 NCNN 音符识别结果。
         AutoContinueController controller = autoContinueController;
         if (controller == null) {
             return;
@@ -297,6 +319,7 @@ public final class CaptureService extends Service {
     }
 
     private boolean isAutoContinueSuppressingGameRecognition() {
+        // 自动继续处于非 PLAYING 状态时，普通音符识别暂停。
         AutoContinueController controller = autoContinueController;
         return controller != null
                 && AppSettings.isAutoContinueEnabled(this)
@@ -307,6 +330,7 @@ public final class CaptureService extends Service {
             ScreenCaptureSource.Frame frame,
             long inferenceStartMs,
             long autoContinueMs) {
+        // 自动继续接管时不跑模型，但仍更新 FPS、悬浮窗和预览。
         lastInferenceMs = autoContinueMs;
         recordProcessedFrame();
         long statusStartMs = SystemClock.elapsedRealtime();
@@ -341,6 +365,7 @@ public final class CaptureService extends Service {
     }
 
     private void resetCounters() {
+        // 每次重新开始录屏时清空统计，避免旧数据污染当前 FPS。
         synchronized (metricsLock) {
             totalFrames = 0;
             totalDroppedFrames = 0;
@@ -362,6 +387,7 @@ public final class CaptureService extends Service {
     }
 
     private void recordProcessedFrame() {
+        // 记录一帧处理完成，用于当前 FPS 和总帧数。
         long now = SystemClock.elapsedRealtime();
         synchronized (metricsLock) {
             totalFrames++;
@@ -371,6 +397,7 @@ public final class CaptureService extends Service {
     }
 
     private void recordDroppedFrame() {
+        // 处理不过来时记录丢帧，用 drop/s 判断性能瓶颈。
         long now = SystemClock.elapsedRealtime();
         synchronized (metricsLock) {
             totalDroppedFrames++;
@@ -380,6 +407,7 @@ public final class CaptureService extends Service {
     }
 
     private void recordAction(String action, int x, int y) {
+        // AutoPlayer 每执行一次动作会回调这里，用来更新动作统计。
         totalActions.incrementAndGet();
         if ("tap".equals(action)) {
             tapActions.incrementAndGet();
@@ -392,6 +420,7 @@ public final class CaptureService extends Service {
     }
 
     private void refreshFpsWindow(long now) {
+        // FPS 是最近 1 秒窗口内的帧数，不是累计平均值。
         trimWindow(frameTimesMs, now);
         trimWindow(droppedTimesMs, now);
         currentFps = frameTimesMs.size();
@@ -405,6 +434,7 @@ public final class CaptureService extends Service {
     }
 
     private void updateClickMode(AutoPlayer currentAutoPlayer) {
+        // 不点击模式只识别不操作；关闭后延迟 5 秒恢复点击。
         boolean noClickMode = AppSettings.isNoClickMode(this);
         long now = SystemClock.elapsedRealtime();
         if (noClickMode) {
@@ -420,6 +450,7 @@ public final class CaptureService extends Service {
     }
 
     private String clickModeText() {
+        // 悬浮窗上的点击模式文本：只识别、延迟恢复中、或正常点击。
         if (AppSettings.isNoClickMode(this)) {
             return "只识别";
         }
@@ -432,11 +463,13 @@ public final class CaptureService extends Service {
     }
 
     private boolean isClickBlockedNow() {
+        // 自动继续和普通音符点击都会参考这个开关。
         return AppSettings.isNoClickMode(this)
                 || clickResumeAtMs > SystemClock.elapsedRealtime();
     }
 
     private void updateRuntimeStatus(int detectionCount) {
+        // 悬浮窗每秒更新一次，通知栏每 3 秒更新一次，降低 UI 开销。
         long now = SystemClock.elapsedRealtime();
         if (now - lastOverlayUpdateMs >= OVERLAY_UPDATE_INTERVAL_MS) {
             lastOverlayUpdateMs = now;
@@ -459,6 +492,7 @@ public final class CaptureService extends Service {
     }
 
     private String formatStatus(int detectionCount) {
+        // 悬浮窗状态正文，包含 FPS、耗时、动作计数、判定线和模型状态。
         return String.format(
                 Locale.US,
                 "运行中\nFPS：%.1f  Drop/s：%.1f  Infer：%dms\nTotal：%d  DropTotal：%d  识别：%d\n点击：%s  动作：%d  Tap：%d  Hold：%d  Flick：%d\n判定：%.0f  映射：%s  最后：%s\n模型：%s",
@@ -484,6 +518,7 @@ public final class CaptureService extends Service {
             List<Detection> detections,
             long inferenceMs,
             double actionYBase) {
+        // 预览窗口关闭或未显示时直接跳过，避免额外绘制影响 FPS。
         DetectionPreviewOverlay overlay = previewOverlay;
         if (overlay == null || !overlay.isShown()) {
             return;
@@ -500,12 +535,14 @@ public final class CaptureService extends Service {
     }
 
     private void failStart(String text) {
+        // 启动失败时释放已创建组件，并把错误显示到悬浮窗/通知栏。
         releaseRuntime();
         running = false;
         updateVisibleStatus(text, true);
     }
 
     private void stopEverything() {
+        // 用户停止服务时释放运行时和所有悬浮窗。
         releaseRuntime();
         running = false;
         if (previewOverlay != null) {
@@ -520,6 +557,7 @@ public final class CaptureService extends Service {
     }
 
     private void releaseRuntime() {
+        // 释放录屏、root 注入器、识别器和状态机。
         if (captureSource != null) {
             captureSource.close();
             captureSource = null;
@@ -537,6 +575,7 @@ public final class CaptureService extends Service {
     }
 
     private void showOverlay(String text) {
+        // 状态悬浮窗包含停止、预览、不点击模式、调试显示等按钮。
         if (statusOverlay == null) {
             statusOverlay = new StatusOverlay(this, () -> {
                 stopEverything();
@@ -554,6 +593,7 @@ public final class CaptureService extends Service {
     }
 
     private String autoContinueStatusText() {
+        // 小窗口右侧的自动继续状态文字来自 AutoContinueController。
         AutoContinueController controller = autoContinueController;
         if (controller == null || !AppSettings.isAutoContinueEnabled(this)) {
             return "演奏歌曲";
@@ -562,6 +602,7 @@ public final class CaptureService extends Service {
     }
 
     private void toggleNoClickMode() {
+        // 手动切换不点击模式；关闭时强制 5 秒延迟，给用户回到游戏的时间。
         boolean enabled = !AppSettings.isNoClickMode(this);
         AppSettings.setNoClickMode(this, enabled);
         if (enabled) {
@@ -578,6 +619,7 @@ public final class CaptureService extends Service {
     }
 
     private void toggleDebugDisplay() {
+        // 调试显示会打开系统“显示点击操作/指针位置”，需要 root 写系统设置。
         boolean enabled = !AppSettings.isDebugDisplayEnabled(this);
         AppSettings.setDebugDisplayEnabled(this, enabled);
         if (statusOverlay != null) {
@@ -594,6 +636,7 @@ public final class CaptureService extends Service {
     }
 
     private void setPreviewEnabled(boolean enabled) {
+        // 开关小预览窗口。关闭时销毁窗口，开启时需要悬浮窗权限。
         AppSettings.setPreviewEnabled(this, enabled);
         if (statusOverlay != null) {
             statusOverlay.setPreviewEnabled(enabled);
@@ -619,6 +662,7 @@ public final class CaptureService extends Service {
     }
 
     private void updateVisibleStatus(String text, boolean alsoNotification) {
+        // 统一更新悬浮窗状态；必要时同步更新通知栏。
         if (statusOverlay == null || !statusOverlay.isShown()) {
             showOverlay(text);
         } else {
@@ -630,6 +674,7 @@ public final class CaptureService extends Service {
     }
 
     private void updateNotification(String text) {
+        // 前台服务通知，保证录屏服务持续运行。
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null) {
             nm.notify(NOTIFICATION_ID, buildNotification(text));
@@ -637,6 +682,7 @@ public final class CaptureService extends Service {
     }
 
     private Notification buildNotification(String text) {
+        // 通知点击回主界面，暂停按钮会发 ACTION_STOP 停止服务。
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
@@ -670,6 +716,7 @@ public final class CaptureService extends Service {
     }
 
     private void createNotificationChannel() {
+        // Android 8.0+ 必须先创建通知渠道才能显示前台服务通知。
         if (Build.VERSION.SDK_INT < 26) {
             return;
         }
