@@ -18,3 +18,10 @@ note-after-tap.png
 # Native/Gradle intermediate files
 .cxx/
 captures/
+
+# Local YOLO training environment and outputs
+.venv-yolo/
+runs/
+datasets/
+yolo*.pt
+yolov*.pt

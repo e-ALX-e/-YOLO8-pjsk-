@@ -18,6 +18,8 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.pjsk.autoplayer.core.AutoContinueController;
+
 public final class StatusOverlay {
     private static final String TAG = "PJSK-StatusOverlay";
 
@@ -34,6 +36,7 @@ public final class StatusOverlay {
     private LinearLayout contentView;
     private LinearLayout parameterView;
     private TextView statusTitleView;
+    private TextView autoContinueStatusView;
     private TextView statusView;
     private Button collapseButton;
     private Button detailsButton;
@@ -42,7 +45,8 @@ public final class StatusOverlay {
     private Button debugDisplayButton;
     private boolean collapsed;
     private boolean parametersVisible;
-    private boolean gameEndedPaused;
+    private boolean clickBlocked;
+    private String autoContinueStatus = AutoContinueController.STATUS_PLAYING;
 
     private int startX;
     private int startY;
@@ -99,13 +103,28 @@ public final class StatusOverlay {
     }
 
     public void setClickBlocked(boolean blocked) {
-        mainHandler.post(() -> updateClickModeColor(blocked));
+        mainHandler.post(() -> {
+            clickBlocked = blocked;
+            updateClickModeColor();
+        });
     }
 
     public void setGameEndedPaused(boolean paused) {
+        setAutoContinueStatus(paused
+                ? AutoContinueController.STATUS_GAME_ENDED
+                : AutoContinueController.STATUS_PLAYING);
+    }
+
+    public void setAutoContinueStatus(String status) {
         mainHandler.post(() -> {
-            gameEndedPaused = paused;
-            updateClickModeColor(paused || false);
+            autoContinueStatus = status == null
+                    ? AutoContinueController.STATUS_PLAYING
+                    : status;
+            if (autoContinueStatusView != null) {
+                autoContinueStatusView.setText(autoContinueStatus);
+                updateAutoContinueStatusColor();
+            }
+            updateClickModeColor();
         });
     }
 
@@ -179,14 +198,27 @@ public final class StatusOverlay {
         header.setGravity(Gravity.CENTER_VERTICAL);
 
         statusTitleView = new TextView(context);
-        statusTitleView.setText("运行状态");
+        statusTitleView.setText("状态");
         statusTitleView.setTextSize(14f);
         statusTitleView.setTypeface(Typeface.DEFAULT_BOLD);
-        updateClickModeColor(false);
-        header.addView(statusTitleView, new LinearLayout.LayoutParams(
-                0,
+        updateClickModeColor();
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f));
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        titleParams.setMargins(0, 0, dp(8), 0);
+        header.addView(statusTitleView, titleParams);
+
+        autoContinueStatusView = new TextView(context);
+        autoContinueStatusView.setText(autoContinueStatus);
+        autoContinueStatusView.setTextSize(11f);
+        autoContinueStatusView.setTypeface(Typeface.DEFAULT_BOLD);
+        autoContinueStatusView.setGravity(Gravity.CENTER);
+        autoContinueStatusView.setPadding(dp(8), 0, dp(8), 0);
+        autoContinueStatusView.setSingleLine(true);
+        updateAutoContinueStatusColor();
+        LinearLayout.LayoutParams autoStatusParams = new LinearLayout.LayoutParams(dp(88), dp(28));
+        autoStatusParams.setMargins(0, 0, dp(6), 0);
+        header.addView(autoContinueStatusView, autoStatusParams);
 
         debugDisplayButton = makeSmallButton("调试显示");
         debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
@@ -301,18 +333,50 @@ public final class StatusOverlay {
         updateLayout();
     }
 
-    private void updateClickModeColor(boolean noClickMode) {
+    private void updateClickModeColor() {
         if (statusTitleView != null) {
             int color;
-            if (gameEndedPaused) {
+            if (AutoContinueController.STATUS_GAME_ENDED.equals(autoContinueStatus)) {
                 color = Color.rgb(255, 194, 87);
-            } else if (noClickMode) {
+            } else if (AutoContinueController.STATUS_SELECT_SONG.equals(autoContinueStatus)) {
+                color = Color.rgb(126, 214, 255);
+            } else if (clickBlocked) {
                 color = Color.rgb(255, 102, 102);
             } else {
                 color = Color.rgb(94, 232, 142);
             }
             statusTitleView.setTextColor(color);
         }
+    }
+
+    private void updateAutoContinueStatusColor() {
+        if (autoContinueStatusView == null) {
+            return;
+        }
+        int textColor;
+        int backgroundColor;
+        if (AutoContinueController.STATUS_GAME_ENDED.equals(autoContinueStatus)) {
+            textColor = Color.rgb(255, 226, 159);
+            backgroundColor = Color.argb(80, 255, 194, 87);
+        } else if (AutoContinueController.STATUS_SELECT_SONG.equals(autoContinueStatus)) {
+            textColor = Color.rgb(126, 214, 255);
+            backgroundColor = Color.argb(80, 76, 169, 255);
+        } else {
+            textColor = Color.rgb(94, 232, 142);
+            backgroundColor = Color.argb(80, 64, 200, 118);
+        }
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(backgroundColor);
+        background.setCornerRadius(dp(7));
+        background.setStroke(
+                dp(1),
+                Color.argb(
+                        120,
+                        (textColor >> 16) & 0xff,
+                        (textColor >> 8) & 0xff,
+                        textColor & 0xff));
+        autoContinueStatusView.setTextColor(textColor);
+        autoContinueStatusView.setBackground(background);
     }
 
     private void updateLayout() {
@@ -353,6 +417,7 @@ public final class StatusOverlay {
         contentView = null;
         parameterView = null;
         statusTitleView = null;
+        autoContinueStatusView = null;
         statusView = null;
         collapseButton = null;
         detailsButton = null;
@@ -362,7 +427,7 @@ public final class StatusOverlay {
         params = null;
         parametersVisible = false;
         collapsed = false;
-        gameEndedPaused = false;
+        autoContinueStatus = AutoContinueController.STATUS_PLAYING;
     }
 
     private GradientDrawable makeBackground() {
