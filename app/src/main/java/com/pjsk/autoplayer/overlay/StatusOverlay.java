@@ -42,6 +42,7 @@ public final class StatusOverlay {
     private Button debugDisplayButton;
     private boolean collapsed;
     private boolean parametersVisible;
+    private boolean gameEndedPaused;
 
     private int startX;
     private int startY;
@@ -99,6 +100,13 @@ public final class StatusOverlay {
 
     public void setClickBlocked(boolean blocked) {
         mainHandler.post(() -> updateClickModeColor(blocked));
+    }
+
+    public void setGameEndedPaused(boolean paused) {
+        mainHandler.post(() -> {
+            gameEndedPaused = paused;
+            updateClickModeColor(paused || false);
+        });
     }
 
     public void setDebugDisplayEnabled(boolean enabled) {
@@ -295,9 +303,15 @@ public final class StatusOverlay {
 
     private void updateClickModeColor(boolean noClickMode) {
         if (statusTitleView != null) {
-            statusTitleView.setTextColor(noClickMode
-                    ? Color.rgb(255, 102, 102)
-                    : Color.rgb(94, 232, 142));
+            int color;
+            if (gameEndedPaused) {
+                color = Color.rgb(255, 194, 87);
+            } else if (noClickMode) {
+                color = Color.rgb(255, 102, 102);
+            } else {
+                color = Color.rgb(94, 232, 142);
+            }
+            statusTitleView.setTextColor(color);
         }
     }
 
@@ -348,6 +362,7 @@ public final class StatusOverlay {
         params = null;
         parametersVisible = false;
         collapsed = false;
+        gameEndedPaused = false;
     }
 
     private GradientDrawable makeBackground() {

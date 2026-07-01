@@ -17,6 +17,7 @@ import android.util.Log;
 
 import com.pjsk.autoplayer.core.AutoPlayer;
 import com.pjsk.autoplayer.core.Detection;
+import com.pjsk.autoplayer.core.GameEndPauseController;
 import com.pjsk.autoplayer.input.RootEventInjector;
 import com.pjsk.autoplayer.ncnn.NcnnDetector;
 import com.pjsk.autoplayer.overlay.DetectionPreviewOverlay;
@@ -26,6 +27,7 @@ import com.pjsk.autoplayer.settings.AppSettings;
 import com.pjsk.autoplayer.settings.DebugDisplayController;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
@@ -59,6 +61,7 @@ public final class CaptureService extends Service {
     private ScreenCaptureSource captureSource;
     private NcnnDetector detector;
     private AutoPlayer autoPlayer;
+    private GameEndPauseController gameEndPauseController;
     private RootEventInjector injector;
     private StatusOverlay statusOverlay;
     private DetectionPreviewOverlay previewOverlay;
@@ -80,6 +83,7 @@ public final class CaptureService extends Service {
     private long lastDiagnosticsLogMs;
     private long clickResumeAtMs;
     private boolean previousNoClickMode;
+    private boolean gameEndedPaused;
     private String detectorStatus = "";
 
     public static boolean isRunning() {
@@ -146,6 +150,7 @@ public final class CaptureService extends Service {
         Log.i(TAG, "detector status: " + detectorStatus);
         injector = new RootEventInjector(this);
         autoPlayer = new AutoPlayer(injector, this::recordAction);
+        gameEndPauseController = new GameEndPauseController();
         resetCounters();
         previousNoClickMode = AppSettings.isNoClickMode(this);
         clickResumeAtMs = 0L;
@@ -200,6 +205,15 @@ public final class CaptureService extends Service {
             NcnnDetector currentDetector = detector;
             AutoPlayer currentAutoPlayer = autoPlayer;
             if (currentDetector == null || currentAutoPlayer == null) {
+                return;
+            }
+
+            GameEndPauseController currentGameEndPauseController = gameEndPauseController;
+            if (currentGameEndPauseController != null
+                    && currentGameEndPauseController.onFrame(frame.bitmap)) {
+                gameEndedPaused = true;
+                currentAutoPlayer.setClickEnabled(false);
+                handleGameEndedPausedFrame(frame, inferenceStartMs);
                 return;
             }
 
@@ -269,6 +283,28 @@ public final class CaptureService extends Service {
         }
     }
 
+    private void handleGameEndedPausedFrame(ScreenCaptureSource.Frame frame, long inferenceStartMs) {
+        lastInferenceMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
+        recordProcessedFrame();
+        updateRuntimeStatus(0);
+        updatePreview(frame, Collections.emptyList(), lastInferenceMs, AppSettings.getActionY(this));
+
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastDiagnosticsLogMs >= 1000) {
+            lastDiagnosticsLogMs = now;
+            Log.i(TAG, "frame=" + frame.width + "x" + frame.height
+                    + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                    + " fps=" + String.format(Locale.US, "%.1f", currentFps)
+                    + " infer=" + lastInferenceMs + "ms"
+                    + " stageMs=capture:" + frame.captureMs
+                    + ",detect:paused:gameEnd"
+                    + ",preview:paused"
+                    + ",action:paused"
+                    + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
+                    + " detector=paused:gameEnd");
+        }
+    }
+
     private void resetCounters() {
         synchronized (metricsLock) {
             totalFrames = 0;
@@ -283,6 +319,10 @@ public final class CaptureService extends Service {
         lastNotificationUpdateMs = 0L;
         lastDiagnosticsLogMs = 0L;
         clickResumeAtMs = 0L;
+        gameEndedPaused = false;
+        if (gameEndPauseController != null) {
+            gameEndPauseController.reset();
+        }
         totalActions.set(0);
         tapActions.set(0);
         holdActions.set(0);
@@ -349,6 +389,9 @@ public final class CaptureService extends Service {
     }
 
     private String clickModeText() {
+        if (gameEndedPaused) {
+            return "游戏结束";
+        }
         if (AppSettings.isNoClickMode(this)) {
             return "只识别";
         }
@@ -372,6 +415,7 @@ public final class CaptureService extends Service {
             updateVisibleStatus(formatStatus(detectionCount), false);
             if (statusOverlay != null) {
                 statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
+                statusOverlay.setGameEndedPaused(gameEndedPaused);
                 statusOverlay.setClickBlocked(isClickBlockedNow());
             }
         }
@@ -458,6 +502,7 @@ public final class CaptureService extends Service {
         }
         processing.set(false);
         autoPlayer = null;
+        gameEndPauseController = null;
         detector = null;
         detectorStatus = "";
         resetCounters();
@@ -475,6 +520,7 @@ public final class CaptureService extends Service {
         statusOverlay.show(text);
         statusOverlay.setPreviewEnabled(AppSettings.isPreviewEnabled(this));
         statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
+        statusOverlay.setGameEndedPaused(gameEndedPaused);
         statusOverlay.setClickBlocked(isClickBlockedNow());
         statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
     }
