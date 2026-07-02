@@ -27,6 +27,7 @@ public final class StatusOverlay {
     private final Runnable onStopClick;
     private final Runnable onPreviewClick;
     private final Runnable onNoClickClick;
+    private final Runnable onAutoSoloClick;
     private final Runnable onDebugDisplayClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -42,10 +43,12 @@ public final class StatusOverlay {
     private Button detailsButton;
     private Button previewButton;
     private Button noClickButton;
+    private Button autoSoloButton;
     private Button debugDisplayButton;
     private boolean collapsed;
     private boolean parametersVisible;
     private boolean clickBlocked;
+    private boolean autoSoloMode;
     private String autoContinueStatus = AutoContinueController.STATUS_PLAYING;
 
     private int startX;
@@ -58,11 +61,13 @@ public final class StatusOverlay {
             Runnable onStopClick,
             Runnable onPreviewClick,
             Runnable onNoClickClick,
+            Runnable onAutoSoloClick,
             Runnable onDebugDisplayClick) {
         this.context = context.getApplicationContext();
         this.onStopClick = onStopClick;
         this.onPreviewClick = onPreviewClick;
         this.onNoClickClick = onNoClickClick;
+        this.onAutoSoloClick = onAutoSoloClick;
         this.onDebugDisplayClick = onDebugDisplayClick;
     }
 
@@ -98,6 +103,18 @@ public final class StatusOverlay {
         mainHandler.post(() -> {
             if (noClickButton != null) {
                 noClickButton.setText(enabled ? "允许点击" : "不点击");
+            }
+        });
+    }
+
+    public void setAutoSoloMode(boolean enabled) {
+        mainHandler.post(() -> {
+            autoSoloMode = enabled;
+            if (autoSoloButton != null) {
+                autoSoloButton.setText(enabled ? "单人开" : "单人关");
+                autoSoloButton.setTextColor(enabled
+                        ? Color.rgb(94, 232, 142)
+                        : Color.rgb(255, 194, 87));
             }
         });
     }
@@ -269,6 +286,13 @@ public final class StatusOverlay {
         noClickParams.setMargins(0, dp(6), dp(6), 0);
         row.addView(noClickButton, noClickParams);
 
+        autoSoloButton = makeSmallButton("单人开");
+        autoSoloButton.setOnClickListener(v -> onAutoSoloClick.run());
+        LinearLayout.LayoutParams autoSoloParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        autoSoloParams.setMargins(0, dp(6), dp(6), 0);
+        row.addView(autoSoloButton, autoSoloParams);
+        setAutoSoloMode(autoSoloMode);
+
         detailsButton = makeSmallButton("显示参数");
         detailsButton.setOnClickListener(v -> setParametersVisible(!parametersVisible));
         LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
@@ -423,6 +447,7 @@ public final class StatusOverlay {
         detailsButton = null;
         previewButton = null;
         noClickButton = null;
+        autoSoloButton = null;
         debugDisplayButton = null;
         params = null;
         parametersVisible = false;

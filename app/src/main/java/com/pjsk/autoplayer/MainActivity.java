@@ -32,6 +32,7 @@ public final class MainActivity extends Activity {
     private SeekBar calibrationSeekBar;
     private Switch previewSwitch;
     private Switch noClickSwitch;
+    private Switch autoSoloSwitch;
     private boolean updatingCalibrationUi;
 
     @Override
@@ -113,6 +114,21 @@ public final class MainActivity extends Activity {
         noClickParams.setMargins(0, dp(6), 0, 0);
         root.addView(noClickSwitch, noClickParams);
 
+        autoSoloSwitch = new Switch(this);
+        autoSoloSwitch.setText("自动单人模式");
+        autoSoloSwitch.setTextSize(15f);
+        autoSoloSwitch.setTextColor(Color.rgb(45, 52, 64));
+        autoSoloSwitch.setChecked(AppSettings.isAutoSoloModeEnabled(this));
+        autoSoloSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            AppSettings.setAutoSoloModeEnabled(this, isChecked);
+            statusView.setText(isChecked
+                    ? "状态：已开启自动单人模式"
+                    : "状态：已关闭自动单人模式");
+        });
+        LinearLayout.LayoutParams autoSoloParams = matchWrap();
+        autoSoloParams.setMargins(0, dp(6), 0, 0);
+        root.addView(autoSoloSwitch, autoSoloParams);
+
         addCalibrationControls(root);
         addTouchMappingControls(root);
 
@@ -155,6 +171,9 @@ public final class MainActivity extends Activity {
         }
         if (noClickSwitch != null) {
             noClickSwitch.setChecked(AppSettings.isNoClickMode(this));
+        }
+        if (autoSoloSwitch != null) {
+            autoSoloSwitch.setChecked(AppSettings.isAutoSoloModeEnabled(this));
         }
         updateCalibrationUi();
         updateTouchMappingUi();

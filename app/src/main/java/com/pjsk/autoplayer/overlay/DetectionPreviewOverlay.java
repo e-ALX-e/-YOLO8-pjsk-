@@ -96,6 +96,28 @@ public final class DetectionPreviewOverlay {
             long inferenceMs,
             int droppedFrames,
             double actionYBase) {
+        updateFrame(
+                frame,
+                detections,
+                frameWidth,
+                frameHeight,
+                fps,
+                inferenceMs,
+                droppedFrames,
+                actionYBase,
+                false);
+    }
+
+    public void updateFrame(
+            Bitmap frame,
+            List<Detection> detections,
+            int frameWidth,
+            int frameHeight,
+            double fps,
+            long inferenceMs,
+            int droppedFrames,
+            double actionYBase,
+            boolean buttonLabels) {
         if (rootView == null || frame == null || frame.isRecycled()) {
             return;
         }
@@ -119,7 +141,14 @@ public final class DetectionPreviewOverlay {
 
         mainHandler.post(() -> {
             if (previewView != null) {
-                previewView.setFrame(previewBitmap, boxes, frameWidth, frameHeight, actionYBase, stats);
+                previewView.setFrame(
+                        previewBitmap,
+                        boxes,
+                        frameWidth,
+                        frameHeight,
+                        actionYBase,
+                        stats,
+                        buttonLabels);
                 updateCalibrationView();
             } else {
                 previewBitmap.recycle();
@@ -431,6 +460,7 @@ public final class DetectionPreviewOverlay {
         private int frameHeight = 1;
         private double actionYBase = Config.ACTION_Y_DEFAULT;
         private String stats = "waiting";
+        private boolean buttonLabels;
         private boolean calibrationLocked = true;
         private final CalibrationListener calibrationListener;
 
@@ -452,7 +482,8 @@ public final class DetectionPreviewOverlay {
                 int frameWidth,
                 int frameHeight,
                 double actionYBase,
-                String stats) {
+                String stats,
+                boolean buttonLabels) {
             Bitmap oldFrame = this.frame;
             this.frame = frame;
             this.boxes = boxes;
@@ -460,6 +491,7 @@ public final class DetectionPreviewOverlay {
             this.frameHeight = Math.max(1, frameHeight);
             this.actionYBase = AppSettings.clampActionY(actionYBase);
             this.stats = stats;
+            this.buttonLabels = buttonLabels;
             if (oldFrame != null && oldFrame != frame && !oldFrame.isRecycled()) {
                 oldFrame.recycle();
             }
@@ -592,6 +624,11 @@ public final class DetectionPreviewOverlay {
         }
 
         private int colorForClass(int cls) {
+            if (buttonLabels) {
+                return cls == 1
+                        ? Color.rgb(80, 232, 255)
+                        : Color.rgb(255, 218, 92);
+            }
             switch (cls) {
                 case Detection.CLS_HOLD:
                     return Color.rgb(255, 210, 64);
@@ -606,6 +643,9 @@ public final class DetectionPreviewOverlay {
         }
 
         private String labelForClass(int cls) {
+            if (buttonLabels) {
+                return cls == 1 ? "播放" : "确定";
+            }
             switch (cls) {
                 case Detection.CLS_HOLD:
                     return "hold";

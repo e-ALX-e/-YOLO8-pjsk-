@@ -7,6 +7,8 @@ import android.util.Log;
 import com.pjsk.autoplayer.input.TouchInjector;
 import com.pjsk.autoplayer.ncnn.UiButtonDetector;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public final class AutoContinueController {
@@ -24,6 +26,7 @@ public final class AutoContinueController {
     private static final long PAGE_TAP_REPEAT_MS = 900;
     private static final long BUTTON_TAP_REPEAT_MS = 500;
     private static final long PLAY_WAIT_TIMEOUT_MS = 2000;
+    private static final long PLAY_BUTTON_GONE_CONFIRM_MS = 2000;
     private static final long STARTING_SUPPRESS_MS = 2500;
     private static final long GAME_END_AFTER_START_GUARD_MS = 10000;
 
@@ -41,6 +44,9 @@ public final class AutoContinueController {
     private long waitUntilMs;
     private long playWaitStartMs;
     private long liveClearBlockedUntilMs;
+    private long lastNoteSeenMs;
+    private long lastPlayButtonSeenMs;
+    private List<Detection> lastButtonDetections = Collections.emptyList();
 
     public AutoContinueController(TouchInjector injector, UiButtonDetector buttonDetector) {
         this.injector = injector;
@@ -54,6 +60,9 @@ public final class AutoContinueController {
         waitUntilMs = 0L;
         playWaitStartMs = 0L;
         liveClearBlockedUntilMs = 0L;
+        lastNoteSeenMs = 0L;
+        lastPlayButtonSeenMs = 0L;
+        lastButtonDetections = Collections.emptyList();
     }
 
     public boolean shouldSuppressGameRecognition() {
@@ -70,16 +79,28 @@ public final class AutoContinueController {
         return STATUS_SELECT_SONG;
     }
 
+    public List<Detection> buttonDetectionsForPreview() {
+        if (state != State.SELECT_SONG && state != State.WAIT_PLAY) {
+            return Collections.emptyList();
+        }
+        return lastButtonDetections;
+    }
+
     public void onFrame(
             Bitmap frame,
             int displayWidth,
             int displayHeight,
-            boolean clickBlocked) {
+            boolean clickBlocked,
+            List<Detection> noteDetections) {
         if (clickBlocked || frame == null || frame.isRecycled()) {
             return;
         }
 
         long now = SystemClock.elapsedRealtime();
+        if ((state == State.SELECT_SONG || state == State.WAIT_PLAY)
+                && noteDetections != null && !noteDetections.isEmpty()) {
+            lastNoteSeenMs = now;
+        }
         if (now - lastDetectMs < detectionIntervalMs()) {
             return;
         }
@@ -87,10 +108,12 @@ public final class AutoContinueController {
 
         switch (state) {
             case State.PLAYING:
+                lastButtonDetections = Collections.emptyList();
                 detectGameEndOnly(frame, now);
                 break;
 
             case State.GAME_ENDED:
+                lastButtonDetections = Collections.emptyList();
                 handleGameEnded(frame, displayWidth, displayHeight, now);
                 break;
 
@@ -144,27 +167,34 @@ public final class AutoContinueController {
 
     private void handleSongSelect(Bitmap frame, int displayWidth, int displayHeight, long now) {
         List<Detection> buttons = buttonDetector.detect(frame);
+        lastButtonDetections = buttons.isEmpty()
+                ? Collections.emptyList()
+                : new ArrayList<>(buttons);
         Detection play = buttonDetector.findBest(buttons, UiButtonDetector.CLS_PLAY);
+
         if (play != null) {
+            lastPlayButtonSeenMs = now;
+            if (state == State.SELECT_SONG) {
+                state = State.WAIT_PLAY;
+                playWaitStartMs = now;
+            }
             if (now - lastTapMs >= BUTTON_TAP_REPEAT_MS) {
                 tapDetection("play", play, frame, displayWidth, displayHeight);
-                state = State.STARTING;
                 lastTapMs = now;
-                waitUntilMs = now + STARTING_SUPPRESS_MS;
-                liveClearBlockedUntilMs = waitUntilMs + GAME_END_AFTER_START_GUARD_MS;
-                playWaitStartMs = 0L;
                 Log.i(TAG, "play button detected, tapped center");
             }
             return;
         }
 
         if (state == State.WAIT_PLAY) {
-            if (playWaitStartMs > 0L && now - playWaitStartMs >= PLAY_WAIT_TIMEOUT_MS) {
-                state = State.PLAYING;
-                lastTapMs = 0L;
+            if (lastPlayButtonSeenMs > 0L
+                    && now - lastPlayButtonSeenMs >= PLAY_BUTTON_GONE_CONFIRM_MS) {
+                state = State.STARTING;
+                waitUntilMs = now + STARTING_SUPPRESS_MS;
+                liveClearBlockedUntilMs = waitUntilMs + GAME_END_AFTER_START_GUARD_MS;
                 playWaitStartMs = 0L;
-                liveClearBlockedUntilMs = now + GAME_END_AFTER_START_GUARD_MS;
-                Log.i(TAG, "play button missing for 2s, assume playing");
+                lastPlayButtonSeenMs = 0L;
+                Log.i(TAG, "play button disappeared for 2s after tap, switching to playing");
             }
             return;
         }
@@ -175,6 +205,7 @@ public final class AutoContinueController {
             state = State.WAIT_PLAY;
             lastTapMs = now;
             playWaitStartMs = now;
+            lastPlayButtonSeenMs = 0L;
             Log.i(TAG, "confirm button detected, tapped center");
         }
     }
@@ -192,7 +223,9 @@ public final class AutoContinueController {
             int displayWidth,
             int displayHeight) {
         int tapX = Math.round(detection.x / Math.max(1, frame.getWidth()) * displayWidth);
-        int tapY = Math.round(detection.y / Math.max(1, frame.getHeight()) * displayHeight);
+        float boxHeight = detection.y2 - detection.y1;
+        float offsetY = detection.y - boxHeight * 0.15f;
+        int tapY = Math.round(offsetY / Math.max(1, frame.getHeight()) * displayHeight);
         Log.i(TAG, "auto tap reason=" + reason
                 + " x=" + tapX
                 + " y=" + tapY
