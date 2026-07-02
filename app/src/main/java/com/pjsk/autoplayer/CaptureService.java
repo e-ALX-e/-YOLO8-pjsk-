@@ -19,6 +19,7 @@ import com.pjsk.autoplayer.core.AutoContinueController;
 import com.pjsk.autoplayer.core.AutoPlayer;
 import com.pjsk.autoplayer.core.Detection;
 import com.pjsk.autoplayer.input.RootEventInjector;
+import com.pjsk.autoplayer.metrics.GpuUsageSampler;
 import com.pjsk.autoplayer.ncnn.NcnnDetector;
 import com.pjsk.autoplayer.ncnn.UiButtonDetector;
 import com.pjsk.autoplayer.overlay.DetectionPreviewOverlay;
@@ -51,6 +52,7 @@ public final class CaptureService extends Service {
     private static final long OVERLAY_UPDATE_INTERVAL_MS = 1000;
     private static final long NOTIFICATION_UPDATE_INTERVAL_MS = 3000;
     private static final long FPS_WINDOW_MS = 1000;
+    private static final long PERFORMANCE_SAMPLE_INTERVAL_MS = 1000;
     private static final long CLICK_RESUME_DELAY_MS = 5000;
 
     private static volatile boolean running;
@@ -58,6 +60,8 @@ public final class CaptureService extends Service {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean processing = new AtomicBoolean(false);
     private final Object metricsLock = new Object();
+    private final int cpuCoreCount = Math.max(1, Runtime.getRuntime().availableProcessors());
+    private final GpuUsageSampler gpuUsageSampler = new GpuUsageSampler();
 
     private ScreenCaptureSource captureSource;
     private NcnnDetector detector;
@@ -77,6 +81,8 @@ public final class CaptureService extends Service {
     private volatile double currentSourceFps;
     private volatile double currentFps;
     private volatile double currentDropFps;
+    private volatile double currentCpuPercent;
+    private volatile GpuUsageSampler.Sample currentGpuSample = GpuUsageSampler.Sample.unavailable();
     private volatile long lastInferenceMs;
     private final AtomicInteger totalActions = new AtomicInteger();
     private final AtomicInteger tapActions = new AtomicInteger();
@@ -86,6 +92,8 @@ public final class CaptureService extends Service {
     private long lastOverlayUpdateMs;
     private long lastNotificationUpdateMs;
     private long lastDiagnosticsLogMs;
+    private long lastPerformanceSampleWallMs;
+    private long lastPerformanceSampleCpuMs;
     private long clickResumeAtMs;
     private boolean previousNoClickMode;
     private String detectorStatus = "";
@@ -278,8 +286,10 @@ public final class CaptureService extends Service {
                 lastDiagnosticsLogMs = now;
                 Log.i(TAG, "frame=" + frame.width + "x" + frame.height
                         + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                        + " targetFps=" + ScreenCaptureSource.CAPTURE_TARGET_FPS
                         + " sourceFps=" + String.format(Locale.US, "%.1f", currentSourceFps)
                         + " fps=" + String.format(Locale.US, "%.1f", currentFps)
+                        + performanceLogText()
                         + " infer=" + inferenceMs + "ms"
                         + " stageMs=capture:" + frame.captureMs
                         + ",detect:" + detectMs
@@ -328,8 +338,10 @@ public final class CaptureService extends Service {
             lastDiagnosticsLogMs = now;
             Log.i(TAG, "frame=" + frame.width + "x" + frame.height
                     + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                    + " targetFps=" + ScreenCaptureSource.CAPTURE_TARGET_FPS
                     + " sourceFps=" + String.format(Locale.US, "%.1f", currentSourceFps)
                     + " fps=" + String.format(Locale.US, "%.1f", currentFps)
+                    + performanceLogText()
                     + " infer=" + lastInferenceMs + "ms"
                     + " stageMs=capture:" + frame.captureMs
                     + ",detect:paused:autoContinue"
@@ -376,7 +388,12 @@ public final class CaptureService extends Service {
             currentSourceFps = 0.0;
             currentFps = 0.0;
             currentDropFps = 0.0;
+            currentCpuPercent = 0.0;
+            currentGpuSample = GpuUsageSampler.Sample.unavailable();
             lastInferenceMs = 0L;
+            lastPerformanceSampleWallMs = SystemClock.elapsedRealtime();
+            lastPerformanceSampleCpuMs = android.os.Process.getElapsedCpuTime();
+            gpuUsageSampler.reset();
         }
         lastOverlayUpdateMs = 0L;
         lastNotificationUpdateMs = 0L;
@@ -439,6 +456,31 @@ public final class CaptureService extends Service {
         currentSourceFps = sourceFrameTimesMs.size();
         currentFps = frameTimesMs.size();
         currentDropFps = droppedTimesMs.size();
+        updatePerformanceUsage(now);
+    }
+
+    private void updatePerformanceUsage(long now) {
+        if (!AppSettings.isPerformanceMonitorEnabled(this)) {
+            currentCpuPercent = 0.0;
+            currentGpuSample = GpuUsageSampler.Sample.unavailable();
+            lastPerformanceSampleWallMs = now;
+            lastPerformanceSampleCpuMs = android.os.Process.getElapsedCpuTime();
+            gpuUsageSampler.reset();
+            return;
+        }
+
+        long cpuMs = android.os.Process.getElapsedCpuTime();
+        long wallDeltaMs = now - lastPerformanceSampleWallMs;
+        long cpuDeltaMs = cpuMs - lastPerformanceSampleCpuMs;
+        if (wallDeltaMs < PERFORMANCE_SAMPLE_INTERVAL_MS) {
+            return;
+        }
+
+        double percent = cpuDeltaMs * 100.0 / Math.max(1L, wallDeltaMs) / cpuCoreCount;
+        currentCpuPercent = Math.max(0.0, Math.min(100.0, percent));
+        currentGpuSample = gpuUsageSampler.sample();
+        lastPerformanceSampleWallMs = now;
+        lastPerformanceSampleCpuMs = cpuMs;
     }
 
     private void trimWindow(Deque<Long> timesMs, long now) {
@@ -494,25 +536,41 @@ public final class CaptureService extends Service {
 
         if (now - lastNotificationUpdateMs >= NOTIFICATION_UPDATE_INTERVAL_MS) {
             lastNotificationUpdateMs = now;
-            updateNotification(String.format(
-                    Locale.US,
-                    "运行中 FPS %.1f 识别 %d",
-                    currentFps,
-                    detectionCount));
+            if (AppSettings.isPerformanceMonitorEnabled(this)) {
+                updateNotification(String.format(
+                        Locale.US,
+                        "运行中 FPS %.1f CPU %.1f%% GPU %s 识别 %d",
+                        currentFps,
+                        currentCpuPercent,
+                        currentGpuSample.formatPercent(),
+                        detectionCount));
+            } else {
+                updateNotification(String.format(
+                        Locale.US,
+                        "运行中 FPS %.1f 识别 %d",
+                        currentFps,
+                        detectionCount));
+            }
         }
     }
 
     private String formatStatus(int detectionCount) {
-        return String.format(
+        double processingLimitFps = processingLimitFps();
+        String left = String.format(
                 Locale.US,
-                "运行中\n源FPS：%.1f  FPS：%.1f  Drop/s：%.1f  Infer：%dms\n源Total：%d  Total：%d  DropTotal：%d  识别：%d\n状态：%s  自动单人：%s  点击：%s\n动作：%d  Tap：%d  Hold：%d  Flick：%d\n判定：%.0f  映射：%s  最后：%s\n模型：%s",
+                "运行中  目标%dHz\n源 %.1f  处理 %.1f\n丢 %.1f\n耗时 %dms  上限≈%.1ffps\n帧 源%d / 处理%d / 丢%d",
+                ScreenCaptureSource.CAPTURE_TARGET_FPS,
                 currentSourceFps,
                 currentFps,
                 currentDropFps,
                 lastInferenceMs,
+                processingLimitFps,
                 totalSourceFrames,
                 totalFrames,
-                totalDroppedFrames,
+                totalDroppedFrames);
+        String right = String.format(
+                Locale.US,
+                "识别 %d  状态 %s\n自动单人 %s  点击 %s\n动作 %d  Tap %d\nHold %d  Flick %d\n判定 %.0f  映射 %s\n最后 %s\n模型 %s",
                 detectionCount,
                 autoContinueStatus,
                 AppSettings.isAutoSoloModeEnabled(this) ? "开" : "关",
@@ -525,6 +583,27 @@ public final class CaptureService extends Service {
                 AppSettings.touchMappingLabel(AppSettings.getTouchMappingMode(this)),
                 lastActionText,
                 detectorStatus);
+        return left + StatusOverlay.PARAMETER_COLUMN_SEPARATOR + right;
+    }
+
+    private double processingLimitFps() {
+        long inferenceMs = lastInferenceMs;
+        if (inferenceMs <= 0L) {
+            return 0.0;
+        }
+        return 1000.0 / inferenceMs;
+    }
+
+    private String performanceLogText() {
+        if (!AppSettings.isPerformanceMonitorEnabled(this)) {
+            return "";
+        }
+        String gpuText = currentGpuSample.formatPercent();
+        String gpuSource = currentGpuSample.source.isEmpty()
+                ? ""
+                : "(" + currentGpuSample.source + ")";
+        return " cpu=" + String.format(Locale.US, "%.1f%%", currentCpuPercent)
+                + " gpu=" + gpuText + gpuSource;
     }
 
     private void updatePreview(

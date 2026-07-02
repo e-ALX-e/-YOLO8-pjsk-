@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 
 public final class ScreenCaptureSource implements AutoCloseable {
     private static final int CAPTURE_MAX_LONG_SIDE = 960;
+    public static final int CAPTURE_TARGET_FPS = 120;
 
     public interface Listener {
         default boolean shouldCaptureFrame() {
@@ -100,6 +101,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
         }, handler);
 
         Surface surface = imageReader.getSurface();
+        configureSurfaceFrameRate(surface);
         virtualDisplay = mediaProjection.createVirtualDisplay(
                 "pjsk-capture",
                 width,
@@ -109,6 +111,14 @@ public final class ScreenCaptureSource implements AutoCloseable {
                 surface,
                 null,
                 null);
+    }
+
+    private void configureSurfaceFrameRate(Surface surface) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            surface.setFrameRate(
+                    CAPTURE_TARGET_FPS,
+                    Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+        }
     }
 
     private Frame toFrame(Image image) {

@@ -3,16 +3,19 @@ package com.pjsk.autoplayer.overlay;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -22,6 +25,7 @@ import com.pjsk.autoplayer.core.AutoContinueController;
 
 public final class StatusOverlay {
     private static final String TAG = "PJSK-StatusOverlay";
+    public static final String PARAMETER_COLUMN_SEPARATOR = "\n@@PJSK_PARAMETER_COLUMN@@\n";
 
     private final Context context;
     private final Runnable onStopClick;
@@ -36,9 +40,11 @@ public final class StatusOverlay {
     private LinearLayout rootView;
     private LinearLayout contentView;
     private LinearLayout parameterView;
+    private LinearLayout statusRowView;
     private TextView statusTitleView;
     private TextView autoContinueStatusView;
-    private TextView statusView;
+    private TextView statusLeftView;
+    private TextView statusRightView;
     private Button collapseButton;
     private Button detailsButton;
     private Button previewButton;
@@ -85,9 +91,8 @@ public final class StatusOverlay {
 
     public void updateStatus(String statusText) {
         mainHandler.post(() -> {
-            if (statusView != null) {
-                statusView.setText(statusText);
-            }
+            updateStatusText(statusText);
+            updateLayout();
         });
     }
 
@@ -184,7 +189,7 @@ public final class StatusOverlay {
 
         rootView = buildView(statusText);
         params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
+                overlayWidthPx(),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 Build.VERSION.SDK_INT >= 26
                         ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -258,15 +263,30 @@ public final class StatusOverlay {
         parameterView.setOrientation(LinearLayout.VERTICAL);
         parameterView.setVisibility(View.GONE);
 
-        statusView = new TextView(context);
-        statusView.setText(statusText);
-        statusView.setTextColor(Color.rgb(225, 232, 240));
-        statusView.setTextSize(12f);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
-                dp(220),
+        LinearLayout statusRow = new LinearLayout(context);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.TOP);
+        statusRowView = statusRow;
+        statusLeftView = makeStatusTextView();
+        statusRightView = makeStatusTextView();
+        LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f);
+        LinearLayout.LayoutParams rightParams = new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f);
+        rightParams.setMargins(dp(16), 0, 0, 0);
+        statusRow.addView(statusLeftView, leftParams);
+        statusRow.addView(statusRightView, rightParams);
+        updateStatusText(statusText);
+
+        LinearLayout.LayoutParams statusRowParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        statusParams.setMargins(0, dp(4), 0, dp(8));
-        parameterView.addView(statusView, statusParams);
+        statusRowParams.setMargins(0, dp(4), 0, dp(8));
+        parameterView.addView(statusRow, statusRowParams);
         contentView.addView(parameterView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -325,6 +345,39 @@ public final class StatusOverlay {
         return button;
     }
 
+    private TextView makeStatusTextView() {
+        TextView view = new TextView(context);
+        view.setTextColor(Color.rgb(225, 232, 240));
+        view.setTextSize(11f);
+        view.setIncludeFontPadding(false);
+        view.setLineSpacing(0f, 0.95f);
+        view.setGravity(Gravity.START);
+        return view;
+    }
+
+    private void updateStatusText(String statusText) {
+        if (statusLeftView == null) {
+            return;
+        }
+        String text = statusText == null ? "" : statusText;
+        int separatorIndex = text.indexOf(PARAMETER_COLUMN_SEPARATOR);
+        if (separatorIndex < 0) {
+            statusLeftView.setText(text);
+            if (statusRightView != null) {
+                statusRightView.setText("");
+                statusRightView.setVisibility(View.GONE);
+            }
+            return;
+        }
+
+        statusLeftView.setText(text.substring(0, separatorIndex));
+        if (statusRightView != null) {
+            statusRightView.setText(text.substring(
+                    separatorIndex + PARAMETER_COLUMN_SEPARATOR.length()));
+            statusRightView.setVisibility(View.VISIBLE);
+        }
+    }
+
     private void setParametersVisible(boolean visible) {
         parametersVisible = visible;
         if (parameterView != null) {
@@ -333,6 +386,7 @@ public final class StatusOverlay {
         if (detailsButton != null) {
             detailsButton.setText(visible ? "隐藏参数" : "显示参数");
         }
+        applyDynamicWidth();
         updateLayout();
     }
 
@@ -354,6 +408,7 @@ public final class StatusOverlay {
                     dp(10),
                     collapsed ? dp(6) : dp(8));
         }
+        applyDynamicWidth();
         updateLayout();
     }
 
@@ -405,6 +460,7 @@ public final class StatusOverlay {
 
     private void updateLayout() {
         if (windowManager != null && rootView != null && params != null) {
+            applyDynamicWidth();
             try {
                 windowManager.updateViewLayout(rootView, params);
             } catch (IllegalArgumentException ignored) {
@@ -440,9 +496,11 @@ public final class StatusOverlay {
         rootView = null;
         contentView = null;
         parameterView = null;
+        statusRowView = null;
         statusTitleView = null;
         autoContinueStatusView = null;
-        statusView = null;
+        statusLeftView = null;
+        statusRightView = null;
         collapseButton = null;
         detailsButton = null;
         previewButton = null;
@@ -465,5 +523,35 @@ public final class StatusOverlay {
 
     private int dp(int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
+    }
+
+    private void applyDynamicWidth() {
+        if (params != null) {
+            params.width = collapsed ? WindowManager.LayoutParams.WRAP_CONTENT : overlayWidthPx();
+        }
+        if (statusRowView != null) {
+            ViewGroup.LayoutParams rowParams = statusRowView.getLayoutParams();
+            if (rowParams != null) {
+                rowParams.width = LinearLayout.LayoutParams.MATCH_PARENT;
+                statusRowView.setLayoutParams(rowParams);
+            }
+        }
+    }
+
+    private int overlayWidthPx() {
+        int screenWidth = currentWindowWidthPx();
+        int maxWidth = Math.max(dp(320), screenWidth - dp(48));
+        int targetWidth = Math.round(screenWidth * 0.62f);
+        int minWidth = Math.min(maxWidth, dp(420));
+        return Math.max(minWidth, Math.min(maxWidth, targetWidth));
+    }
+
+    private int currentWindowWidthPx() {
+        if (windowManager != null && Build.VERSION.SDK_INT >= 30) {
+            Rect bounds = windowManager.getCurrentWindowMetrics().getBounds();
+            return Math.max(bounds.width(), bounds.height());
+        }
+        DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+        return Math.max(metrics.widthPixels, metrics.heightPixels);
     }
 }

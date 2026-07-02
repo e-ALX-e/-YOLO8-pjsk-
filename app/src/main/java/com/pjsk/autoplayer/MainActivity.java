@@ -33,6 +33,7 @@ public final class MainActivity extends Activity {
     private Switch previewSwitch;
     private Switch noClickSwitch;
     private Switch autoSoloSwitch;
+    private Switch performanceMonitorSwitch;
     private boolean updatingCalibrationUi;
 
     @Override
@@ -129,6 +130,21 @@ public final class MainActivity extends Activity {
         autoSoloParams.setMargins(0, dp(6), 0, 0);
         root.addView(autoSoloSwitch, autoSoloParams);
 
+        performanceMonitorSwitch = new Switch(this);
+        performanceMonitorSwitch.setText("性能监控（CPU/GPU，写入通知和日志）");
+        performanceMonitorSwitch.setTextSize(15f);
+        performanceMonitorSwitch.setTextColor(Color.rgb(45, 52, 64));
+        performanceMonitorSwitch.setChecked(AppSettings.isPerformanceMonitorEnabled(this));
+        performanceMonitorSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            AppSettings.setPerformanceMonitorEnabled(this, isChecked);
+            statusView.setText(isChecked
+                    ? "状态：已开启性能监控"
+                    : "状态：已关闭性能监控");
+        });
+        LinearLayout.LayoutParams performanceParams = matchWrap();
+        performanceParams.setMargins(0, dp(6), 0, 0);
+        root.addView(performanceMonitorSwitch, performanceParams);
+
         addCalibrationControls(root);
         addTouchMappingControls(root);
 
@@ -174,6 +190,9 @@ public final class MainActivity extends Activity {
         }
         if (autoSoloSwitch != null) {
             autoSoloSwitch.setChecked(AppSettings.isAutoSoloModeEnabled(this));
+        }
+        if (performanceMonitorSwitch != null) {
+            performanceMonitorSwitch.setChecked(AppSettings.isPerformanceMonitorEnabled(this));
         }
         updateCalibrationUi();
         updateTouchMappingUi();
