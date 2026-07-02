@@ -70,8 +70,11 @@ public final class CaptureService extends Service {
 
     private volatile int totalFrames;
     private volatile int totalDroppedFrames;
+    private volatile int totalSourceFrames;
+    private final Deque<Long> sourceFrameTimesMs = new ArrayDeque<>();
     private final Deque<Long> frameTimesMs = new ArrayDeque<>();
     private final Deque<Long> droppedTimesMs = new ArrayDeque<>();
+    private volatile double currentSourceFps;
     private volatile double currentFps;
     private volatile double currentDropFps;
     private volatile long lastInferenceMs;
@@ -177,6 +180,7 @@ public final class CaptureService extends Service {
         captureSource = new ScreenCaptureSource(this, projection, new ScreenCaptureSource.Listener() {
             @Override
             public boolean shouldCaptureFrame() {
+                recordSourceFrame();
                 if (processing.compareAndSet(false, true)) {
                     return true;
                 }
@@ -274,6 +278,7 @@ public final class CaptureService extends Service {
                 lastDiagnosticsLogMs = now;
                 Log.i(TAG, "frame=" + frame.width + "x" + frame.height
                         + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                        + " sourceFps=" + String.format(Locale.US, "%.1f", currentSourceFps)
                         + " fps=" + String.format(Locale.US, "%.1f", currentFps)
                         + " infer=" + inferenceMs + "ms"
                         + " stageMs=capture:" + frame.captureMs
@@ -323,6 +328,7 @@ public final class CaptureService extends Service {
             lastDiagnosticsLogMs = now;
             Log.i(TAG, "frame=" + frame.width + "x" + frame.height
                     + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                    + " sourceFps=" + String.format(Locale.US, "%.1f", currentSourceFps)
                     + " fps=" + String.format(Locale.US, "%.1f", currentFps)
                     + " infer=" + lastInferenceMs + "ms"
                     + " stageMs=capture:" + frame.captureMs
@@ -363,8 +369,11 @@ public final class CaptureService extends Service {
         synchronized (metricsLock) {
             totalFrames = 0;
             totalDroppedFrames = 0;
+            totalSourceFrames = 0;
+            sourceFrameTimesMs.clear();
             frameTimesMs.clear();
             droppedTimesMs.clear();
+            currentSourceFps = 0.0;
             currentFps = 0.0;
             currentDropFps = 0.0;
             lastInferenceMs = 0L;
@@ -382,6 +391,15 @@ public final class CaptureService extends Service {
         holdActions.set(0);
         flickActions.set(0);
         lastActionText = "none";
+    }
+
+    private void recordSourceFrame() {
+        long now = SystemClock.elapsedRealtime();
+        synchronized (metricsLock) {
+            totalSourceFrames++;
+            sourceFrameTimesMs.addLast(now);
+            refreshFpsWindow(now);
+        }
     }
 
     private void recordProcessedFrame() {
@@ -415,8 +433,10 @@ public final class CaptureService extends Service {
     }
 
     private void refreshFpsWindow(long now) {
+        trimWindow(sourceFrameTimesMs, now);
         trimWindow(frameTimesMs, now);
         trimWindow(droppedTimesMs, now);
+        currentSourceFps = sourceFrameTimesMs.size();
         currentFps = frameTimesMs.size();
         currentDropFps = droppedTimesMs.size();
     }
@@ -485,10 +505,12 @@ public final class CaptureService extends Service {
     private String formatStatus(int detectionCount) {
         return String.format(
                 Locale.US,
-                "运行中\nFPS：%.1f  Drop/s：%.1f  Infer：%dms\nTotal：%d  DropTotal：%d  识别：%d\n状态：%s  自动单人：%s  点击：%s\n动作：%d  Tap：%d  Hold：%d  Flick：%d\n判定：%.0f  映射：%s  最后：%s\n模型：%s",
+                "运行中\n源FPS：%.1f  FPS：%.1f  Drop/s：%.1f  Infer：%dms\n源Total：%d  Total：%d  DropTotal：%d  识别：%d\n状态：%s  自动单人：%s  点击：%s\n动作：%d  Tap：%d  Hold：%d  Flick：%d\n判定：%.0f  映射：%s  最后：%s\n模型：%s",
+                currentSourceFps,
                 currentFps,
                 currentDropFps,
                 lastInferenceMs,
+                totalSourceFrames,
                 totalFrames,
                 totalDroppedFrames,
                 detectionCount,
