@@ -531,6 +531,7 @@ public final class CaptureService extends Service {
                 statusOverlay.setClickBlocked(isClickBlockedNow());
                 statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
                 statusOverlay.setAutoContinueStatus(autoContinueStatus);
+                statusOverlay.setPerformanceStatus(performanceOverlayText());
             }
         }
 
@@ -604,6 +605,17 @@ public final class CaptureService extends Service {
                 : "(" + currentGpuSample.source + ")";
         return " cpu=" + String.format(Locale.US, "%.1f%%", currentCpuPercent)
                 + " gpu=" + gpuText + gpuSource;
+    }
+
+    private String performanceOverlayText() {
+        if (!AppSettings.isPerformanceMonitorEnabled(this)) {
+            return "";
+        }
+        return String.format(
+                Locale.US,
+                "CPU %.0f%%  GPU %s",
+                currentCpuPercent,
+                currentGpuSample.formatPercent());
     }
 
     private void updatePreview(
@@ -697,6 +709,7 @@ public final class CaptureService extends Service {
         statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
         statusOverlay.setAutoContinueStatus(autoContinueStatus);
         statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
+        statusOverlay.setPerformanceStatus(performanceOverlayText());
     }
 
     private void toggleNoClickMode() {

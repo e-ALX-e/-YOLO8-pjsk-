@@ -131,7 +131,7 @@ public final class MainActivity extends Activity {
         root.addView(autoSoloSwitch, autoSoloParams);
 
         performanceMonitorSwitch = new Switch(this);
-        performanceMonitorSwitch.setText("性能监控（CPU/GPU，写入通知和日志）");
+        performanceMonitorSwitch.setText("性能监控（CPU/GPU，悬浮窗实时显示）");
         performanceMonitorSwitch.setTextSize(15f);
         performanceMonitorSwitch.setTextColor(Color.rgb(45, 52, 64));
         performanceMonitorSwitch.setChecked(AppSettings.isPerformanceMonitorEnabled(this));

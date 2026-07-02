@@ -43,6 +43,7 @@ public final class StatusOverlay {
     private LinearLayout statusRowView;
     private TextView statusTitleView;
     private TextView autoContinueStatusView;
+    private TextView performanceStatusView;
     private TextView statusLeftView;
     private TextView statusRightView;
     private Button collapseButton;
@@ -150,6 +151,21 @@ public final class StatusOverlay {
         });
     }
 
+    public void setPerformanceStatus(String status) {
+        mainHandler.post(() -> {
+            if (performanceStatusView == null) {
+                return;
+            }
+            if (status == null || status.isEmpty()) {
+                performanceStatusView.setText("");
+                performanceStatusView.setVisibility(View.GONE);
+                return;
+            }
+            performanceStatusView.setText(status);
+            performanceStatusView.setVisibility(View.VISIBLE);
+        });
+    }
+
     public void setDebugDisplayEnabled(boolean enabled) {
         mainHandler.post(() -> {
             if (debugDisplayButton != null) {
@@ -241,6 +257,22 @@ public final class StatusOverlay {
         LinearLayout.LayoutParams autoStatusParams = new LinearLayout.LayoutParams(dp(88), dp(28));
         autoStatusParams.setMargins(0, 0, dp(6), 0);
         header.addView(autoContinueStatusView, autoStatusParams);
+
+        performanceStatusView = new TextView(context);
+        performanceStatusView.setTextSize(11f);
+        performanceStatusView.setTypeface(Typeface.DEFAULT_BOLD);
+        performanceStatusView.setGravity(Gravity.CENTER);
+        performanceStatusView.setSingleLine(true);
+        performanceStatusView.setTextColor(Color.rgb(126, 214, 255));
+        GradientDrawable performanceBackground = new GradientDrawable();
+        performanceBackground.setColor(Color.argb(70, 76, 169, 255));
+        performanceBackground.setCornerRadius(dp(7));
+        performanceBackground.setStroke(dp(1), Color.argb(120, 126, 214, 255));
+        performanceStatusView.setBackground(performanceBackground);
+        performanceStatusView.setVisibility(View.GONE);
+        LinearLayout.LayoutParams performanceParams = new LinearLayout.LayoutParams(dp(144), dp(28));
+        performanceParams.setMargins(0, 0, dp(6), 0);
+        header.addView(performanceStatusView, performanceParams);
 
         debugDisplayButton = makeSmallButton("调试显示");
         debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
@@ -499,6 +531,7 @@ public final class StatusOverlay {
         statusRowView = null;
         statusTitleView = null;
         autoContinueStatusView = null;
+        performanceStatusView = null;
         statusLeftView = null;
         statusRightView = null;
         collapseButton = null;
