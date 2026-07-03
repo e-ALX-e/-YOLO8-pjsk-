@@ -29,6 +29,7 @@ public final class MainActivity extends Activity {
     private TextView overlayStatusView;
     private TextView calibrationValueView;
     private TextView touchMappingView;
+    private TextView noteModelView;
     private SeekBar calibrationSeekBar;
     private Switch previewSwitch;
     private Switch noClickSwitch;
@@ -131,6 +132,7 @@ public final class MainActivity extends Activity {
 
         addCalibrationControls(root);
         addTouchMappingControls(root);
+        addNoteModelControls(root);
 
         overlayStatusView = new TextView(this);
         overlayStatusView.setTextSize(15f);
@@ -177,6 +179,7 @@ public final class MainActivity extends Activity {
         }
         updateCalibrationUi();
         updateTouchMappingUi();
+        updateNoteModelUi();
     }
 
     private void requestCapture() {
@@ -355,6 +358,46 @@ public final class MainActivity extends Activity {
         }
         int mode = AppSettings.getTouchMappingMode(this);
         touchMappingView.setText("当前映射：" + AppSettings.touchMappingLabel(mode));
+    }
+
+    private void addNoteModelControls(LinearLayout root) {
+        TextView title = new TextView(this);
+        title.setText("音符识别模型");
+        title.setTextColor(Color.rgb(20, 24, 32));
+        title.setTextSize(16f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams titleParams = matchWrap();
+        titleParams.setMargins(0, dp(12), 0, dp(2));
+        root.addView(title, titleParams);
+
+        noteModelView = new TextView(this);
+        noteModelView.setTextColor(Color.rgb(45, 52, 64));
+        noteModelView.setTextSize(15f);
+        noteModelView.setGravity(Gravity.CENTER);
+        root.addView(noteModelView, matchWrap());
+
+        Button cycle = new Button(this);
+        cycle.setText("切换音符模型");
+        cycle.setAllCaps(false);
+        cycle.setOnClickListener(v -> {
+            int mode = AppSettings.nextNoteModelMode(this);
+            updateNoteModelUi();
+            statusView.setText("状态：音符模型已切换为 "
+                    + AppSettings.noteModelLabel(mode)
+                    + "，下次启动生效");
+        });
+        root.addView(cycle, buttonParams());
+
+        updateNoteModelUi();
+    }
+
+    private void updateNoteModelUi() {
+        if (noteModelView == null) {
+            return;
+        }
+        int mode = AppSettings.getNoteModelMode(this);
+        noteModelView.setText("当前模型：" + AppSettings.noteModelLabel(mode));
     }
 
     @Override

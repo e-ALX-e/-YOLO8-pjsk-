@@ -13,6 +13,7 @@ public final class AppSettings {
     private static final String KEY_DEBUG_DISPLAY_ENABLED = "debug_display_enabled";
     private static final String KEY_ACTION_Y = "action_y";
     private static final String KEY_TOUCH_MAPPING_MODE = "touch_mapping_mode";
+    private static final String KEY_NOTE_MODEL_MODE = "note_model_mode";
 
     public static final int ACTION_Y_MIN = (int) Config.ACTION_Y_MIN;
     public static final int ACTION_Y_MAX = (int) Config.ACTION_Y_MAX;
@@ -20,6 +21,9 @@ public final class AppSettings {
     public static final int TOUCH_MAPPING_LANDSCAPE_90 = 0;
     public static final int TOUCH_MAPPING_DIRECT = 1;
     public static final int TOUCH_MAPPING_LANDSCAPE_270 = 2;
+    public static final int NOTE_MODEL_ORIGINAL = 0;
+    public static final int NOTE_MODEL_RETRAINED = 1;
+    public static final int NOTE_MODEL_INT8 = 2;
 
     private AppSettings() {
     }
@@ -107,9 +111,51 @@ public final class AppSettings {
         }
     }
 
+    public static int getNoteModelMode(Context context) {
+        int mode = prefs(context).getInt(KEY_NOTE_MODEL_MODE, NOTE_MODEL_ORIGINAL);
+        if (mode < NOTE_MODEL_ORIGINAL || mode > NOTE_MODEL_INT8) {
+            return NOTE_MODEL_ORIGINAL;
+        }
+        return mode;
+    }
+
+    public static void setNoteModelMode(Context context, int mode) {
+        prefs(context).edit()
+                .putInt(KEY_NOTE_MODEL_MODE, clampNoteModelMode(mode))
+                .apply();
+    }
+
+    public static int nextNoteModelMode(Context context) {
+        int next = getNoteModelMode(context) + 1;
+        if (next > NOTE_MODEL_INT8) {
+            next = NOTE_MODEL_ORIGINAL;
+        }
+        setNoteModelMode(context, next);
+        return next;
+    }
+
+    public static String noteModelLabel(int mode) {
+        switch (mode) {
+            case NOTE_MODEL_RETRAINED:
+                return "重训模型";
+            case NOTE_MODEL_INT8:
+                return "量化模型";
+            case NOTE_MODEL_ORIGINAL:
+            default:
+                return "原版模型";
+        }
+    }
+
     private static int clampTouchMappingMode(int mode) {
         if (mode < TOUCH_MAPPING_LANDSCAPE_90 || mode > TOUCH_MAPPING_LANDSCAPE_270) {
             return TOUCH_MAPPING_LANDSCAPE_90;
+        }
+        return mode;
+    }
+
+    private static int clampNoteModelMode(int mode) {
+        if (mode < NOTE_MODEL_ORIGINAL || mode > NOTE_MODEL_INT8) {
+            return NOTE_MODEL_ORIGINAL;
         }
         return mode;
     }
