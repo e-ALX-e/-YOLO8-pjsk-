@@ -22,6 +22,10 @@ public final class NcnnDetector {
     private static final String INT8_BIN_PATH = "note_int8_ncnn_model/model.int8.bin";
     private static final String INT8_640_PARAM_PATH = "note_640_int8_ncnn_model/model_640.int8.param";
     private static final String INT8_640_BIN_PATH = "note_640_int8_ncnn_model/model_640.int8.bin";
+    private static final String RETRAINED_640_PARAM_PATH =
+            "note_640_retrained_ncnn_model/model.ncnn.param";
+    private static final String RETRAINED_640_BIN_PATH =
+            "note_640_retrained_ncnn_model/model.ncnn.bin";
 
     private boolean nativeAvailable;
     private String status = "native library not loaded";
@@ -57,6 +61,8 @@ public final class NcnnDetector {
                 return INT8_PARAM_PATH;
             case AppSettings.NOTE_MODEL_640_INT8:
                 return INT8_640_PARAM_PATH;
+            case AppSettings.NOTE_MODEL_640_RETRAINED:
+                return RETRAINED_640_PARAM_PATH;
             case AppSettings.NOTE_MODEL_ORIGINAL:
             default:
                 return NOTE_PARAM_PATH;
@@ -71,6 +77,8 @@ public final class NcnnDetector {
                 return INT8_BIN_PATH;
             case AppSettings.NOTE_MODEL_640_INT8:
                 return INT8_640_BIN_PATH;
+            case AppSettings.NOTE_MODEL_640_RETRAINED:
+                return RETRAINED_640_BIN_PATH;
             case AppSettings.NOTE_MODEL_ORIGINAL:
             default:
                 return NOTE_BIN_PATH;
@@ -78,6 +86,9 @@ public final class NcnnDetector {
     }
 
     private static String noteModelLabel(String paramPath) {
+        if (RETRAINED_640_PARAM_PATH.equals(paramPath)) {
+            return "640\u91cd\u8bad\u6a21\u578b";
+        }
         if (RETRAINED_PARAM_PATH.equals(paramPath)) {
             return "1280重训模型";
         }

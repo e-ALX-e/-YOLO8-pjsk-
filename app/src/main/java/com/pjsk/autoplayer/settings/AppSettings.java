@@ -25,6 +25,7 @@ public final class AppSettings {
     public static final int NOTE_MODEL_RETRAINED = 1;
     public static final int NOTE_MODEL_INT8 = 2;
     public static final int NOTE_MODEL_640_INT8 = 3;
+    public static final int NOTE_MODEL_640_RETRAINED = 4;
 
     private AppSettings() {
     }
@@ -114,7 +115,7 @@ public final class AppSettings {
 
     public static int getNoteModelMode(Context context) {
         int mode = prefs(context).getInt(KEY_NOTE_MODEL_MODE, NOTE_MODEL_ORIGINAL);
-        if (mode < NOTE_MODEL_ORIGINAL || mode > NOTE_MODEL_640_INT8) {
+        if (mode < NOTE_MODEL_ORIGINAL || mode > NOTE_MODEL_640_RETRAINED) {
             return NOTE_MODEL_ORIGINAL;
         }
         return mode;
@@ -128,7 +129,7 @@ public final class AppSettings {
 
     public static int nextNoteModelMode(Context context) {
         int next = getNoteModelMode(context) + 1;
-        if (next > NOTE_MODEL_640_INT8) {
+        if (next > NOTE_MODEL_640_RETRAINED) {
             next = NOTE_MODEL_ORIGINAL;
         }
         setNoteModelMode(context, next);
@@ -143,6 +144,8 @@ public final class AppSettings {
                 return "1280量化模型";
             case NOTE_MODEL_640_INT8:
                 return "640量化模型";
+            case NOTE_MODEL_640_RETRAINED:
+                return "640\u91cd\u8bad\u6a21\u578b";
             case NOTE_MODEL_ORIGINAL:
             default:
                 return "原版模型";
@@ -157,7 +160,7 @@ public final class AppSettings {
     }
 
     private static int clampNoteModelMode(int mode) {
-        if (mode < NOTE_MODEL_ORIGINAL || mode > NOTE_MODEL_640_INT8) {
+        if (mode < NOTE_MODEL_ORIGINAL || mode > NOTE_MODEL_640_RETRAINED) {
             return NOTE_MODEL_ORIGINAL;
         }
         return mode;
