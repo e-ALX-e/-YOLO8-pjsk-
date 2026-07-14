@@ -30,6 +30,7 @@ public final class StatusOverlay {
     private final Runnable onPreviewClick;
     private final Runnable onNoClickClick;
     private final Runnable onAutoSoloClick;
+    private final Runnable onLogicPlayClick;
     private final Runnable onDebugDisplayClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -46,11 +47,13 @@ public final class StatusOverlay {
     private Button previewButton;
     private Button noClickButton;
     private Button autoSoloButton;
+    private Button logicPlayButton;
     private Button debugDisplayButton;
     private boolean collapsed;
     private boolean parametersVisible;
     private boolean clickBlocked;
     private boolean autoSoloMode;
+    private boolean logicPlayMode;
     private String autoContinueStatus = AutoContinueController.STATUS_PLAYING;
 
     private int startX;
@@ -64,12 +67,14 @@ public final class StatusOverlay {
             Runnable onPreviewClick,
             Runnable onNoClickClick,
             Runnable onAutoSoloClick,
+            Runnable onLogicPlayClick,
             Runnable onDebugDisplayClick) {
         this.context = context.getApplicationContext();
         this.onStopClick = onStopClick;
         this.onPreviewClick = onPreviewClick;
         this.onNoClickClick = onNoClickClick;
         this.onAutoSoloClick = onAutoSoloClick;
+        this.onLogicPlayClick = onLogicPlayClick;
         this.onDebugDisplayClick = onDebugDisplayClick;
     }
 
@@ -116,6 +121,19 @@ public final class StatusOverlay {
                 autoSoloButton.setText(enabled ? "单人开" : "单人关");
                 autoSoloButton.setTextColor(enabled
                         ? Color.rgb(94, 232, 142)
+                        : Color.rgb(255, 194, 87));
+            }
+        });
+    }
+
+
+    public void setLogicPlayMode(boolean enabled) {
+        mainHandler.post(() -> {
+            logicPlayMode = enabled;
+            if (logicPlayButton != null) {
+                logicPlayButton.setText(enabled ? "\u903b\u8f91\u5f00" : "\u903b\u8f91\u5173");
+                logicPlayButton.setTextColor(enabled
+                        ? Color.rgb(126, 214, 255)
                         : Color.rgb(255, 194, 87));
             }
         });
@@ -294,15 +312,24 @@ public final class StatusOverlay {
         detailsButton.setOnClickListener(v -> setParametersVisible(!parametersVisible));
         secondRow.addView(detailsButton, makeGridButtonParams(true));
 
-        debugDisplayButton = makeSmallButton("调试显示");
-        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
-        secondRow.addView(debugDisplayButton, makeGridButtonParams(true));
+        logicPlayButton = makeSmallButton("\u903b\u8f91\u5173");
+        logicPlayButton.setOnClickListener(v -> onLogicPlayClick.run());
+        secondRow.addView(logicPlayButton, makeGridButtonParams(true));
+        setLogicPlayMode(logicPlayMode);
 
-        Button stop = makeSmallButton("停止");
-        stop.setOnClickListener(v -> onStopClick.run());
-        secondRow.addView(stop, makeGridButtonParams(false));
+        debugDisplayButton = makeSmallButton("\u8c03\u8bd5\u663e\u793a");
+        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
+        secondRow.addView(debugDisplayButton, makeGridButtonParams(false));
 
         contentView.addView(secondRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout thirdRow = makeButtonRow();
+        Button stop = makeSmallButton("\u505c\u6b62");
+        stop.setOnClickListener(v -> onStopClick.run());
+        thirdRow.addView(stop, makeGridButtonParams(false));
+        contentView.addView(thirdRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         root.addView(contentView, new LinearLayout.LayoutParams(
@@ -461,6 +488,7 @@ public final class StatusOverlay {
         previewButton = null;
         noClickButton = null;
         autoSoloButton = null;
+        logicPlayButton = null;
         debugDisplayButton = null;
         params = null;
         parametersVisible = false;

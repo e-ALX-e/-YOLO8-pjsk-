@@ -210,6 +210,8 @@ public final class CaptureService extends Service {
                 return;
             }
 
+            updateLogicPlayRuntime(currentAutoPlayer);
+
             AutoContinueController currentAutoContinueController = autoContinueController;
             if (AppSettings.isAutoSoloModeEnabled(this)) {
                 if (currentAutoContinueController == null) {
@@ -232,9 +234,16 @@ public final class CaptureService extends Service {
                 autoContinueStatus = currentAutoContinueController.statusText();
                 if (currentAutoContinueController.shouldSuppressGameRecognition()) {
                     currentAutoPlayer.setClickEnabled(false);
+                    currentAutoPlayer.resetLogicPlayRuntime();
                     handleAutoContinueFrame(frame, inferenceStartMs, currentAutoContinueController);
                     return;
                 }
+            }
+
+            if (currentAutoPlayer.isLogicPlayActive()) {
+                updateClickMode(currentAutoPlayer);
+                handleLogicPlayFrame(frame, inferenceStartMs, currentAutoPlayer);
+                return;
             }
 
             long detectStartMs = SystemClock.elapsedRealtime();
@@ -331,6 +340,48 @@ public final class CaptureService extends Service {
                     + ",action:paused"
                     + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
                     + " autoContinue=" + autoContinueStatus);
+        }
+    }
+
+
+    private void updateLogicPlayRuntime(AutoPlayer currentAutoPlayer) {
+        currentAutoPlayer.setLogicPlayConfig(
+                AppSettings.isLogicPlayModeEnabled(this),
+                AppSettings.getLogicTapIntervalMs(this),
+                AppSettings.getLogicTapXRatio(this));
+    }
+
+    private void handleLogicPlayFrame(
+            ScreenCaptureSource.Frame frame,
+            long inferenceStartMs,
+            AutoPlayer currentAutoPlayer) {
+        long actionStartMs = SystemClock.elapsedRealtime();
+        currentAutoPlayer.onFrame(
+                Collections.emptyList(),
+                frame.width,
+                frame.height,
+                frame.displayWidth,
+                frame.displayHeight,
+                frame.timestampSec);
+        long actionMs = Math.max(0L, SystemClock.elapsedRealtime() - actionStartMs);
+        lastInferenceMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
+        recordProcessedFrame();
+        updateRuntimeStatus(0);
+        updatePreview(frame, Collections.emptyList(), lastInferenceMs, AppSettings.getActionY(this));
+
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastDiagnosticsLogMs >= 1000) {
+            lastDiagnosticsLogMs = now;
+            Log.i(TAG, "frame=" + frame.width + "x" + frame.height
+                    + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                    + " fps=" + String.format(Locale.US, "%.1f", currentFps)
+                    + " infer=" + lastInferenceMs + "ms"
+                    + " stageMs=capture:" + frame.captureMs
+                    + ",detect:paused:logic"
+                    + ",preview:logic"
+                    + ",action:" + actionMs
+                    + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
+                    + " logic=" + currentAutoPlayer.logicPlayStatus());
         }
     }
 
@@ -468,6 +519,7 @@ public final class CaptureService extends Service {
                 statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
                 statusOverlay.setClickBlocked(isClickBlockedNow());
                 statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
+                statusOverlay.setLogicPlayMode(AppSettings.isLogicPlayModeEnabled(this));
                 statusOverlay.setAutoContinueStatus(autoContinueStatus);
             }
         }
@@ -587,6 +639,7 @@ public final class CaptureService extends Service {
             }, () -> setPreviewEnabled(!AppSettings.isPreviewEnabled(this)),
                     this::toggleNoClickMode,
                     this::toggleAutoSoloMode,
+                    this::toggleLogicPlayMode,
                     this::toggleDebugDisplay);
         }
         statusOverlay.show(text);
@@ -594,6 +647,7 @@ public final class CaptureService extends Service {
         statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
         statusOverlay.setClickBlocked(isClickBlockedNow());
         statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
+        statusOverlay.setLogicPlayMode(AppSettings.isLogicPlayModeEnabled(this));
         statusOverlay.setAutoContinueStatus(autoContinueStatus);
         statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
     }
@@ -623,6 +677,20 @@ public final class CaptureService extends Service {
             statusOverlay.setAutoContinueStatus(autoContinueStatus);
         }
         updateNotification(enabled ? "已开启自动单人模式" : "已关闭自动单人模式");
+    }
+
+
+    private void toggleLogicPlayMode() {
+        boolean enabled = !AppSettings.isLogicPlayModeEnabled(this);
+        AppSettings.setLogicPlayModeEnabled(this, enabled);
+        AutoPlayer currentAutoPlayer = autoPlayer;
+        if (currentAutoPlayer != null) {
+            updateLogicPlayRuntime(currentAutoPlayer);
+        }
+        if (statusOverlay != null) {
+            statusOverlay.setLogicPlayMode(enabled);
+        }
+        updateNotification(enabled ? "\u5df2\u5f00\u542f\u903b\u8f91\u6f14\u594f\u6a21\u5f0f" : "\u5df2\u5173\u95ed\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
     }
 
     private void toggleDebugDisplay() {

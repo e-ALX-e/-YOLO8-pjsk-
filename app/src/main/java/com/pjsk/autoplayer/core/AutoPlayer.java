@@ -31,7 +31,13 @@ public final class AutoPlayer {
     private double displayScaleY = 1.0;
     private double actionYBase = Config.ACTION_Y_DEFAULT;
     private double currentTimestampSec;
+    private int currentFrameW = (int) Config.REFERENCE_FRAME_WIDTH;
     private boolean clickEnabled = true;
+    private boolean logicPlayEnabled;
+    private boolean logicPlayActive;
+    private int logicTapIntervalMs = 500;
+    private double logicTapXRatio = 0.5;
+    private double nextLogicTapAtSec = Double.NaN;
 
     public AutoPlayer(TouchInjector injector) {
         this(injector, null);
@@ -56,6 +62,7 @@ public final class AutoPlayer {
         displayScaleX = displayW / (double) Math.max(1, frameW);
         displayScaleY = displayH / (double) Math.max(1, frameH);
         currentTimestampSec = timestampSec;
+        currentFrameW = frameW;
         List<NoteTrack> confirmed = tracker.update(detections, frameW, frameH, timestampSec);
         processAutoAction(confirmed);
     }
@@ -73,8 +80,38 @@ public final class AutoPlayer {
         this.clickEnabled = clickEnabled;
     }
 
+    public void setLogicPlayConfig(boolean enabled, int tapIntervalMs, double tapXRatio) {
+        if (logicPlayEnabled && !enabled) {
+            resetLogicPlayRuntime();
+        }
+        logicPlayEnabled = enabled;
+        logicTapIntervalMs = Math.max(80, Math.min(5000, tapIntervalMs));
+        logicTapXRatio = Math.max(0.05, Math.min(0.95, tapXRatio));
+    }
+
+    public boolean isLogicPlayActive() {
+        return logicPlayEnabled && logicPlayActive;
+    }
+
+    public String logicPlayStatus() {
+        if (!logicPlayEnabled) {
+            return "\u5173";
+        }
+        return logicPlayActive ? "\u70b9\u51fb\u4e2d" : "\u7b49\u5f85\u9996\u97f3\u7b26";
+    }
+
+    public void resetLogicPlayRuntime() {
+        logicPlayActive = false;
+        nextLogicTapAtSec = Double.NaN;
+        releaseAllActiveTouches();
+    }
+
     private void processAutoAction(List<NoteTrack> confirmedTracks) {
         double actionY = s(actionYBase);
+        if (logicPlayEnabled && logicPlayActive) {
+            processLogicPlay(actionY);
+            return;
+        }
         List<PendingRelease> pendingTapReleases = new ArrayList<>();
         List<TouchPoint> pendingFlicks = new ArrayList<>();
 
@@ -110,6 +147,12 @@ public final class AutoPlayer {
                         && trk.y <= triggerY + lateTriggerMargin;
 
                 if (crossedLine || nearLine) {
+                    if (logicPlayEnabled) {
+                        startLogicPlay(actionY);
+                        processLogicPlay(actionY);
+                        return;
+                    }
+
                     if (!clickEnabled) {
                         ns.state = NoteState.STATE_FINISHED;
                         continue;
@@ -230,6 +273,34 @@ public final class AutoPlayer {
             for (TouchPoint point : pendingFlicks) {
                 scheduleTouchIdRelease(point.touchId);
             }
+        }
+    }
+
+
+    private void startLogicPlay(double actionY) {
+        logicPlayActive = true;
+        nextLogicTapAtSec = currentTimestampSec;
+        releaseAllActiveTouches();
+        noteStates.clear();
+        flickHints.clear();
+        Log.i(TAG, "logic play started actionY=" + actionY
+                + " intervalMs=" + logicTapIntervalMs
+                + " xRatio=" + logicTapXRatio);
+    }
+
+    private void processLogicPlay(double actionY) {
+        releaseDueTouchIds();
+        if (!clickEnabled) {
+            return;
+        }
+        if (Double.isNaN(nextLogicTapAtSec) || currentTimestampSec >= nextLogicTapAtSec) {
+            int touchX = toDisplayX(logicTapXRatio * Math.max(1, currentFrameW));
+            int touchY = toDisplayY(actionY);
+            Log.i(TAG, "logic tap x=" + touchX + " y=" + touchY);
+            reportAction("logic", touchX, touchY);
+            injector.down(touchX, touchY, 0);
+            injector.up(0);
+            nextLogicTapAtSec = currentTimestampSec + logicTapIntervalMs / 1000.0;
         }
     }
 

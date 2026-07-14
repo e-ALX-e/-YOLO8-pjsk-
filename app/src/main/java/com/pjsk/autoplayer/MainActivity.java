@@ -2,6 +2,8 @@ package com.pjsk.autoplayer;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
@@ -34,6 +36,8 @@ public final class MainActivity extends Activity {
     private Switch previewSwitch;
     private Switch noClickSwitch;
     private Switch autoSoloSwitch;
+    private Switch logicPlaySwitch;
+    private TextView logicProfileView;
     private boolean updatingCalibrationUi;
 
     @Override
@@ -130,6 +134,23 @@ public final class MainActivity extends Activity {
         autoSoloParams.setMargins(0, dp(6), 0, 0);
         root.addView(autoSoloSwitch, autoSoloParams);
 
+        logicPlaySwitch = new Switch(this);
+        logicPlaySwitch.setText("\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
+        logicPlaySwitch.setTextSize(15f);
+        logicPlaySwitch.setTextColor(Color.rgb(45, 52, 64));
+        logicPlaySwitch.setChecked(AppSettings.isLogicPlayModeEnabled(this));
+        logicPlaySwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            AppSettings.setLogicPlayModeEnabled(this, isChecked);
+            statusView.setText(isChecked
+                    ? "\u72b6\u6001\uff1a\u5df2\u5f00\u542f\u903b\u8f91\u6f14\u594f\u6a21\u5f0f"
+                    : "\u72b6\u6001\uff1a\u5df2\u5173\u95ed\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
+        });
+        LinearLayout.LayoutParams logicPlayParams = matchWrap();
+        logicPlayParams.setMargins(0, dp(6), 0, 0);
+        root.addView(logicPlaySwitch, logicPlayParams);
+
+        addLogicProfileControls(root);
+
         addCalibrationControls(root);
         addTouchMappingControls(root);
         addNoteModelControls(root);
@@ -177,6 +198,10 @@ public final class MainActivity extends Activity {
         if (autoSoloSwitch != null) {
             autoSoloSwitch.setChecked(AppSettings.isAutoSoloModeEnabled(this));
         }
+        if (logicPlaySwitch != null) {
+            logicPlaySwitch.setChecked(AppSettings.isLogicPlayModeEnabled(this));
+        }
+        updateLogicProfileUi();
         updateCalibrationUi();
         updateTouchMappingUi();
         updateNoteModelUi();
@@ -223,6 +248,85 @@ public final class MainActivity extends Activity {
         overlayStatusView.setTextColor(granted
                 ? Color.rgb(30, 122, 72)
                 : Color.rgb(180, 82, 32));
+    }
+
+
+    private void addLogicProfileControls(LinearLayout root) {
+        TextView title = new TextView(this);
+        title.setText("\u903b\u8f91\u6f14\u594f");
+        title.setTextColor(Color.rgb(20, 24, 32));
+        title.setTextSize(16f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams titleParams = matchWrap();
+        titleParams.setMargins(0, dp(12), 0, dp(2));
+        root.addView(title, titleParams);
+
+        logicProfileView = new TextView(this);
+        logicProfileView.setTextColor(Color.rgb(45, 52, 64));
+        logicProfileView.setTextSize(15f);
+        logicProfileView.setGravity(Gravity.CENTER);
+        root.addView(logicProfileView, matchWrap());
+
+        Button cycle = new Button(this);
+        cycle.setText("\u5207\u6362\u903b\u8f91");
+        cycle.setAllCaps(false);
+        cycle.setOnClickListener(v -> {
+            String label = AppSettings.nextLogicProfile(this);
+            updateLogicProfileUi();
+            statusView.setText("\u72b6\u6001\uff1a\u903b\u8f91\u5df2\u5207\u6362\u4e3a " + label);
+        });
+        root.addView(cycle, buttonParams());
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+
+        Button export = new Button(this);
+        export.setText("\u5bfc\u51fa\u903b\u8f91");
+        export.setAllCaps(false);
+        export.setOnClickListener(v -> {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(ClipData.newPlainText(
+                        "pjsk_logic_profiles",
+                        AppSettings.exportLogicProfilesJson(this)));
+                statusView.setText("\u72b6\u6001\uff1a\u903b\u8f91\u5df2\u5bfc\u51fa\u5230\u526a\u8d34\u677f");
+            }
+        });
+        row.addView(export, new LinearLayout.LayoutParams(0, dp(42), 1f));
+
+        Button importProfiles = new Button(this);
+        importProfiles.setText("\u5bfc\u5165\u903b\u8f91");
+        importProfiles.setAllCaps(false);
+        importProfiles.setOnClickListener(v -> {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            CharSequence clipText = null;
+            if (clipboard != null && clipboard.hasPrimaryClip()
+                    && clipboard.getPrimaryClip() != null
+                    && clipboard.getPrimaryClip().getItemCount() > 0) {
+                clipText = clipboard.getPrimaryClip().getItemAt(0).coerceToText(this);
+            }
+            boolean ok = clipText != null && AppSettings.importLogicProfilesJson(this, clipText.toString());
+            updateLogicProfileUi();
+            statusView.setText(ok ? "\u72b6\u6001\uff1a\u903b\u8f91\u5bfc\u5165\u6210\u529f" : "\u72b6\u6001\uff1a\u526a\u8d34\u677f\u6ca1\u6709\u6709\u6548\u903b\u8f91 JSON");
+        });
+        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        importParams.setMargins(dp(8), 0, 0, 0);
+        row.addView(importProfiles, importParams);
+
+        LinearLayout.LayoutParams rowParams = matchWrap();
+        rowParams.setMargins(0, dp(6), 0, 0);
+        root.addView(row, rowParams);
+
+        updateLogicProfileUi();
+    }
+
+    private void updateLogicProfileUi() {
+        if (logicProfileView == null) {
+            return;
+        }
+        logicProfileView.setText("\u5f53\u524d\u903b\u8f91\uff1a" + AppSettings.logicProfileLabel(this));
     }
 
     private void addCalibrationControls(LinearLayout root) {
