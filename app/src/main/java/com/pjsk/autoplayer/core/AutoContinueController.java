@@ -17,6 +17,7 @@ public final class AutoContinueController {
     public static final String STATUS_PLAYING = "演奏乐曲";
     public static final String STATUS_GAME_ENDED = "游戏结束";
     public static final String STATUS_SELECT_SONG = "选择歌曲";
+    public static final String STATUS_WAIT_LOADING = "等待加载";
 
     private static final int TOUCH_ID = 9;
 
@@ -27,7 +28,6 @@ public final class AutoContinueController {
     private static final long BUTTON_TAP_REPEAT_MS = 500;
     private static final long PLAY_WAIT_TIMEOUT_MS = 2000;
     private static final long PLAY_BUTTON_GONE_CONFIRM_MS = 2000;
-    private static final long STARTING_SUPPRESS_MS = 2500;
     private static final long GAME_END_AFTER_START_GUARD_MS = 10000;
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
@@ -65,16 +65,37 @@ public final class AutoContinueController {
         lastButtonDetections = Collections.emptyList();
     }
 
+    public void forceGameEnded() {
+        state = State.GAME_ENDED;
+        lastDetectMs = 0L;
+        lastTapMs = 0L;
+        waitUntilMs = 0L;
+        playWaitStartMs = 0L;
+        liveClearBlockedUntilMs = 0L;
+        lastNoteSeenMs = 0L;
+        lastPlayButtonSeenMs = 0L;
+        lastButtonDetections = Collections.emptyList();
+        Log.i(TAG, "forced game ended state");
+    }
+
     public boolean shouldSuppressGameRecognition() {
         return state != State.PLAYING;
     }
 
+    /** Keep the note model warm while loading, but never consume its result. */
+    public boolean shouldWarmUpNoteModel() {
+        return state == State.WAIT_LOADING;
+    }
+
     public String statusText() {
-        if (state == State.PLAYING || state == State.STARTING) {
+        if (state == State.PLAYING) {
             return STATUS_PLAYING;
         }
         if (state == State.GAME_ENDED) {
             return STATUS_GAME_ENDED;
+        }
+        if (state == State.WAIT_LOADING) {
+            return STATUS_WAIT_LOADING;
         }
         return STATUS_SELECT_SONG;
     }
@@ -122,13 +143,16 @@ public final class AutoContinueController {
                 handleSongSelect(frame, displayWidth, displayHeight, now);
                 break;
 
-            case State.STARTING:
-                if (now >= waitUntilMs) {
+            case State.WAIT_LOADING:
+                lastButtonDetections = Collections.emptyList();
+                if (isLifeHudVisible(frame)) {
                     state = State.PLAYING;
                     lastTapMs = 0L;
                     waitUntilMs = 0L;
                     playWaitStartMs = 0L;
-                    Log.i(TAG, "resumed playing after start guard");
+                    lastPlayButtonSeenMs = 0L;
+                    liveClearBlockedUntilMs = now + GAME_END_AFTER_START_GUARD_MS;
+                    Log.i(TAG, "LIFE HUD detected, switching to playing");
                 }
                 break;
         }
@@ -189,12 +213,11 @@ public final class AutoContinueController {
         if (state == State.WAIT_PLAY) {
             if (lastPlayButtonSeenMs > 0L
                     && now - lastPlayButtonSeenMs >= PLAY_BUTTON_GONE_CONFIRM_MS) {
-                state = State.STARTING;
-                waitUntilMs = now + STARTING_SUPPRESS_MS;
-                liveClearBlockedUntilMs = waitUntilMs + GAME_END_AFTER_START_GUARD_MS;
+                state = State.WAIT_LOADING;
+                waitUntilMs = 0L;
                 playWaitStartMs = 0L;
                 lastPlayButtonSeenMs = 0L;
-                Log.i(TAG, "play button disappeared for 2s after tap, switching to playing");
+                Log.i(TAG, "play button disappeared for 2s after tap, waiting for LIFE HUD");
             }
             return;
         }
@@ -215,6 +238,7 @@ public final class AutoContinueController {
                 ? PLAYING_DETECTION_INTERVAL_MS
                 : ACTIVE_DETECTION_INTERVAL_MS;
     }
+
 
     private void tapDetection(
             String reason,
@@ -255,6 +279,16 @@ public final class AutoContinueController {
         return cyanRatio(frame, 0.505, 0.235, 0.655, 0.435) > 0.70
                 && greenRatio(frame, 0.505, 0.235, 0.655, 0.435) > 0.65
                 && darkRatio(frame, 0.505, 0.235, 0.655, 0.435) < 0.10;
+    }
+
+    /**
+     * The gameplay HUD always puts white LIFE text directly above a green
+     * health bar at the top right. This tiny color check replaces full note
+     * inference while the chart is loading.
+     */
+    private boolean isLifeHudVisible(Bitmap frame) {
+        return whiteRatio(frame, 0.725, 0.010, 0.845, 0.075) > 0.04
+                && greenRatio(frame, 0.705, 0.035, 0.885, 0.105) > 0.06;
     }
 
     private double whiteRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -316,7 +350,7 @@ public final class AutoContinueController {
         static final int GAME_ENDED = 1;
         static final int SELECT_SONG = 2;
         static final int WAIT_PLAY = 3;
-        static final int STARTING = 4;
+        static final int WAIT_LOADING = 4;
 
         private State() {
         }

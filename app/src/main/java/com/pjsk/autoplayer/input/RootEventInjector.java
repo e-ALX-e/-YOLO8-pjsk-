@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -118,13 +119,23 @@ public final class RootEventInjector implements TouchInjector {
         if (closed) {
             return;
         }
-        inputWorker.execute(() -> {
-            try {
-                task.run();
-            } catch (IOException e) {
-                Log.e(TAG, name + " failed", e);
-            }
-        });
+        try {
+            inputWorker.execute(() -> {
+                try {
+                    task.run();
+                } catch (IOException e) {
+                    if (!closed) {
+                        Log.e(TAG, name + " failed", e);
+                    }
+                } catch (RuntimeException e) {
+                    if (!closed) {
+                        Log.e(TAG, name + " failed", e);
+                    }
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // Service shutdown may race with a final queued touch event.
+        }
     }
 
     private interface InputTask {
@@ -239,7 +250,13 @@ public final class RootEventInjector implements TouchInjector {
     }
 
     private synchronized void send(int type, int code, int value) throws IOException {
+        if (closed) {
+            return;
+        }
         ensureShell();
+        if (closed || shellInput == null) {
+            return;
+        }
         long nowUs = System.currentTimeMillis() * 1000L;
         eventBuffer.clear();
         eventBuffer.putLong(nowUs / 1_000_000L);
@@ -251,7 +268,13 @@ public final class RootEventInjector implements TouchInjector {
     }
 
     private synchronized void flushShell() throws IOException {
+        if (closed) {
+            return;
+        }
         ensureShell();
+        if (closed || shellInput == null) {
+            return;
+        }
         shellInput.flush();
     }
 
@@ -278,7 +301,7 @@ public final class RootEventInjector implements TouchInjector {
         }
     }
 
-    private void closeShell() {
+    private synchronized void closeShell() {
         try {
             if (shellInput != null) {
                 shellInput.close();

@@ -28,6 +28,7 @@ import com.pjsk.autoplayer.settings.AppSettings;
 import com.pjsk.autoplayer.settings.DebugDisplayController;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
@@ -52,11 +53,13 @@ public final class CaptureService extends Service {
     private static final long NOTIFICATION_UPDATE_INTERVAL_MS = 3000;
     private static final long FPS_WINDOW_MS = 1000;
     private static final long CLICK_RESUME_DELAY_MS = 5000;
+    private static final long LOGIC_CONFIG_REFRESH_MS = 1000;
 
     private static volatile boolean running;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean processing = new AtomicBoolean(false);
+    private final AtomicBoolean projectionRecoveryPending = new AtomicBoolean(false);
     private final Object metricsLock = new Object();
 
     private ScreenCaptureSource captureSource;
@@ -83,8 +86,15 @@ public final class CaptureService extends Service {
     private long lastOverlayUpdateMs;
     private long lastNotificationUpdateMs;
     private long lastDiagnosticsLogMs;
+    private long lastLogicConfigRefreshMs = Long.MIN_VALUE;
     private long clickResumeAtMs;
     private boolean previousNoClickMode;
+    private boolean previousLogicPlayMode;
+    private boolean cachedLogicPlaySettingEnabled;
+    private boolean cachedLogicPlayEnabled;
+    private int cachedLogicTapIntervalMs = 500;
+    private double cachedLogicTapXRatio = 0.5;
+    private List<AutoPlayer.LogicEvent> cachedLogicEvents = Collections.emptyList();
     private String detectorStatus = "";
     private String autoContinueStatus = AutoContinueController.STATUS_PLAYING;
 
@@ -146,14 +156,19 @@ public final class CaptureService extends Service {
 
         stopEverything();
         running = true;
+        projectionRecoveryPending.set(false);
 
         detector = new NcnnDetector(this);
         detectorStatus = detector.status();
         Log.i(TAG, "detector status: " + detectorStatus);
         injector = new RootEventInjector(this);
         autoPlayer = new AutoPlayer(injector, this::recordAction);
-        updateAutoSoloRuntime(AppSettings.isAutoSoloModeEnabled(this));
+        updateAutoSoloRuntime(shouldRunAutoContinue());
         resetCounters();
+        previousLogicPlayMode = AppSettings.isLogicPlayModeEnabled(this);
+        if (previousLogicPlayMode) {
+            forceLogicPlayGameEnded(autoPlayer);
+        }
         previousNoClickMode = AppSettings.isNoClickMode(this);
         clickResumeAtMs = 0L;
         showOverlay("启动中\n模型：" + detectorStatus);
@@ -195,6 +210,18 @@ public final class CaptureService extends Service {
                 recordDroppedFrame();
                 processing.set(false);
             }
+
+            @Override
+            public void onCaptureStopped() {
+                if (projectionRecoveryPending.compareAndSet(false, true)) {
+                    processing.set(false);
+                    AutoPlayer player = autoPlayer;
+                    if (player != null) {
+                        player.setClickEnabled(false);
+                    }
+                    worker.execute(CaptureService.this::recoverStoppedProjection);
+                }
+            }
         });
         captureSource.start();
 
@@ -204,6 +231,9 @@ public final class CaptureService extends Service {
     private void processFrame(ScreenCaptureSource.Frame frame) {
         long inferenceStartMs = SystemClock.elapsedRealtime();
         try {
+            if (projectionRecoveryPending.get()) {
+                return;
+            }
             NcnnDetector currentDetector = detector;
             AutoPlayer currentAutoPlayer = autoPlayer;
             if (currentDetector == null || currentAutoPlayer == null) {
@@ -211,9 +241,15 @@ public final class CaptureService extends Service {
             }
 
             updateLogicPlayRuntime(currentAutoPlayer);
+            boolean logicPlayEnabled = AppSettings.isLogicPlayModeEnabled(this);
+            if (logicPlayEnabled && !previousLogicPlayMode) {
+                AppSettings.setAutoSoloModeEnabled(this, true);
+                forceLogicPlayGameEnded(currentAutoPlayer);
+            }
+            previousLogicPlayMode = logicPlayEnabled;
 
             AutoContinueController currentAutoContinueController = autoContinueController;
-            if (AppSettings.isAutoSoloModeEnabled(this)) {
+            if (shouldRunAutoContinue()) {
                 if (currentAutoContinueController == null) {
                     updateAutoSoloRuntime(true);
                     currentAutoContinueController = autoContinueController;
@@ -235,6 +271,11 @@ public final class CaptureService extends Service {
                 if (currentAutoContinueController.shouldSuppressGameRecognition()) {
                     currentAutoPlayer.setClickEnabled(false);
                     currentAutoPlayer.resetLogicPlayRuntime();
+                    if (currentAutoContinueController.shouldWarmUpNoteModel()) {
+                        // Warm up inference during the loading transition. Results are intentionally
+                        // discarded so a false note cannot start logic play or inject input.
+                        currentDetector.detect(frame.bitmap);
+                    }
                     handleAutoContinueFrame(frame, inferenceStartMs, currentAutoContinueController);
                     return;
                 }
@@ -335,7 +376,9 @@ public final class CaptureService extends Service {
                     + " fps=" + String.format(Locale.US, "%.1f", currentFps)
                     + " infer=" + lastInferenceMs + "ms"
                     + " stageMs=capture:" + frame.captureMs
-                    + ",detect:paused:autoContinue"
+                    + (currentAutoContinueController.shouldWarmUpNoteModel()
+                    ? ",detect:warmup:discarded"
+                    : ",detect:paused:autoContinue")
                     + ",preview:autoContinue"
                     + ",action:paused"
                     + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
@@ -345,10 +388,59 @@ public final class CaptureService extends Service {
 
 
     private void updateLogicPlayRuntime(AutoPlayer currentAutoPlayer) {
+        boolean enabled = AppSettings.isLogicPlayModeEnabled(this);
+        long now = SystemClock.elapsedRealtime();
+        if (lastLogicConfigRefreshMs == Long.MIN_VALUE
+                || enabled != cachedLogicPlaySettingEnabled
+                || now - lastLogicConfigRefreshMs >= LOGIC_CONFIG_REFRESH_MS) {
+            refreshLogicPlayConfig(enabled, now);
+        }
         currentAutoPlayer.setLogicPlayConfig(
-                AppSettings.isLogicPlayModeEnabled(this),
-                AppSettings.getLogicTapIntervalMs(this),
-                AppSettings.getLogicTapXRatio(this));
+                cachedLogicPlayEnabled,
+                cachedLogicTapIntervalMs,
+                cachedLogicTapXRatio,
+                cachedLogicEvents);
+    }
+
+    private void refreshLogicPlayConfig(boolean enabled, long now) {
+        AppSettings.LogicPlayPlan plan = AppSettings.getLogicPlayPlan(this);
+        List<AutoPlayer.LogicEvent> events = new ArrayList<>(plan.events.size());
+        for (AppSettings.LogicEvent event : plan.events) {
+            List<AutoPlayer.LogicPoint> points = new ArrayList<>(event.points.size());
+            for (AppSettings.LogicPoint point : event.points) {
+                points.add(new AutoPlayer.LogicPoint(point.timeMs, point.xRatio));
+            }
+            events.add(new AutoPlayer.LogicEvent(
+                    event.timeMs,
+                    event.type,
+                    event.xRatio,
+                    event.endXRatio,
+                    event.durationMs,
+                    points));
+        }
+        cachedLogicPlaySettingEnabled = enabled;
+        cachedLogicPlayEnabled = enabled && plan.valid;
+        cachedLogicTapIntervalMs = plan.tapIntervalMs;
+        cachedLogicTapXRatio = plan.tapXRatio;
+        cachedLogicEvents = events.isEmpty() ? Collections.emptyList() : events;
+        lastLogicConfigRefreshMs = now;
+    }
+
+    private boolean shouldRunAutoContinue() {
+        return AppSettings.isAutoSoloModeEnabled(this)
+                || AppSettings.isLogicPlayModeEnabled(this);
+    }
+
+    private void forceLogicPlayGameEnded(AutoPlayer currentAutoPlayer) {
+        AppSettings.setAutoSoloModeEnabled(this, true);
+        updateAutoSoloRuntime(true);
+        if (autoContinueController != null) {
+            autoContinueController.forceGameEnded();
+            autoContinueStatus = autoContinueController.statusText();
+        }
+        if (currentAutoPlayer != null) {
+            currentAutoPlayer.resetLogicPlayRuntime();
+        }
     }
 
     private void handleLogicPlayFrame(
@@ -593,6 +685,36 @@ public final class CaptureService extends Service {
         updateVisibleStatus(text, true);
     }
 
+    /**
+     * A user-choice MediaProjection ends when the chosen game process exits.
+     * Stop all input immediately, then bring the activity forward for a fresh
+     * single-app authorization. Root grants the AppOp first; Android may still
+     * require the user to confirm the system dialog.
+     */
+    private void recoverStoppedProjection() {
+        Log.w(TAG, "single-app media projection stopped; requesting reauthorization");
+        processing.set(false);
+        running = false;
+        AutoPlayer player = autoPlayer;
+        if (player != null) {
+            player.setClickEnabled(false);
+        }
+        updateVisibleStatus("录屏已停止，正在申请单应用录屏授权", true);
+
+        updateVisibleStatus("录屏已停止，请在主界面点击开始运行重新授权", true);
+        Intent intent = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(MainActivity.EXTRA_AUTO_REAUTHORIZE, true);
+        try {
+            startActivity(intent);
+        } catch (RuntimeException error) {
+            Log.e(TAG, "failed to launch reauthorization activity", error);
+            updateVisibleStatus("录屏已停止，请回软件重新授权单应用录屏", true);
+        }
+    }
+
     private void stopEverything() {
         releaseRuntime();
         running = false;
@@ -684,13 +806,21 @@ public final class CaptureService extends Service {
         boolean enabled = !AppSettings.isLogicPlayModeEnabled(this);
         AppSettings.setLogicPlayModeEnabled(this, enabled);
         AutoPlayer currentAutoPlayer = autoPlayer;
+        if (enabled) {
+            forceLogicPlayGameEnded(currentAutoPlayer);
+            previousLogicPlayMode = true;
+        } else {
+            previousLogicPlayMode = false;
+        }
         if (currentAutoPlayer != null) {
             updateLogicPlayRuntime(currentAutoPlayer);
         }
         if (statusOverlay != null) {
+            statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
             statusOverlay.setLogicPlayMode(enabled);
+            statusOverlay.setAutoContinueStatus(autoContinueStatus);
         }
-        updateNotification(enabled ? "\u5df2\u5f00\u542f\u903b\u8f91\u6f14\u594f\u6a21\u5f0f" : "\u5df2\u5173\u95ed\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
+        updateNotification(enabled ? "\u5df2\u5f00\u542f\u903b\u8f91\u6f14\u594f\u6a21\u5f0f\uff0c\u5148\u8fdb\u5165\u6e38\u620f\u7ed3\u675f\u6d41\u7a0b" : "\u5df2\u5173\u95ed\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
     }
 
     private void toggleDebugDisplay() {
@@ -811,4 +941,3 @@ public final class CaptureService extends Service {
         return null;
     }
 }
-

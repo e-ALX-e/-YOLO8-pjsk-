@@ -19,6 +19,7 @@ import android.view.WindowManager;
 import android.view.WindowMetrics;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 public final class ScreenCaptureSource implements AutoCloseable {
     private static final int CAPTURE_MAX_LONG_SIDE = 960;
@@ -31,6 +32,9 @@ public final class ScreenCaptureSource implements AutoCloseable {
         void onFrame(Frame frame);
 
         default void onCaptureError(Throwable error) {
+        }
+
+        default void onCaptureStopped() {
         }
     }
 
@@ -45,6 +49,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
     private VirtualDisplay virtualDisplay;
     private Bitmap frameBitmap;
     private Bitmap paddedBitmap;
+    private ByteBuffer pixelCopyBuffer;
     private boolean frameBitmapInUse;
     private int displayWidth;
     private int displayHeight;
@@ -74,6 +79,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
             @Override
             public void onStop() {
                 releaseResources(false);
+                listener.onCaptureStopped();
             }
         };
         mediaProjection.registerCallback(projectionCallback, handler);
@@ -84,17 +90,22 @@ public final class ScreenCaptureSource implements AutoCloseable {
             if (image == null) {
                 return;
             }
+            Frame frame = null;
             try {
-                if (!listener.shouldCaptureFrame()) {
+                if (isClosed() || !listener.shouldCaptureFrame()) {
                     return;
                 }
                 try {
-                    Frame frame = toFrame(image);
+                    frame = toFrame(image);
                     listener.onFrame(frame);
+                    frame = null;
                 } catch (Throwable t) {
                     listener.onCaptureError(t);
                 }
             } finally {
+                if (frame != null) {
+                    frame.close();
+                }
                 image.close();
             }
         }, handler);
@@ -111,23 +122,41 @@ public final class ScreenCaptureSource implements AutoCloseable {
                 null);
     }
 
-    private Frame toFrame(Image image) {
+    private synchronized Frame toFrame(Image image) {
+        if (closed) {
+            throw new IllegalStateException("capture source is closed");
+        }
         long startNs = System.nanoTime();
         Image.Plane plane = image.getPlanes()[0];
         ByteBuffer buffer = plane.getBuffer();
-        buffer.rewind();
 
         int pixelStride = plane.getPixelStride();
         int rowStride = plane.getRowStride();
+        if (pixelStride != 4 || rowStride < pixelStride * width) {
+            throw new IllegalStateException("unexpected capture layout: pixelStride=" + pixelStride
+                    + " rowStride=" + rowStride + " width=" + width);
+        }
+        int requiredBytes = rowStride * height;
+        ByteBuffer source = buffer.duplicate();
+        source.rewind();
+        if (source.remaining() < requiredBytes) {
+            throw new IllegalStateException("capture buffer is too small: "
+                    + source.remaining() + " < " + requiredBytes);
+        }
+        source.limit(source.position() + requiredBytes);
+        ByteBuffer pixels = obtainPixelCopyBuffer(requiredBytes);
+        pixels.put(source);
+        pixels.flip();
+
         int rowPadding = rowStride - pixelStride * width;
         int bitmapWidth = width + rowPadding / pixelStride;
 
         Bitmap bitmap = obtainFrameBitmap(width, height);
         if (bitmapWidth == width) {
-            bitmap.copyPixelsFromBuffer(buffer);
+            bitmap.copyPixelsFromBuffer(pixels);
         } else {
             Bitmap padded = obtainPaddedBitmap(bitmapWidth, height);
-            padded.copyPixelsFromBuffer(buffer);
+            padded.copyPixelsFromBuffer(pixels);
             Canvas canvas = new Canvas(bitmap);
             Rect src = new Rect(0, 0, width, height);
             Rect dst = new Rect(0, 0, width, height);
@@ -145,6 +174,19 @@ public final class ScreenCaptureSource implements AutoCloseable {
                 timestampSec,
                 captureMs,
                 () -> releaseFrameBitmap(bitmap));
+    }
+
+    private ByteBuffer obtainPixelCopyBuffer(int requiredBytes) {
+        if (pixelCopyBuffer == null || pixelCopyBuffer.capacity() < requiredBytes) {
+            pixelCopyBuffer = ByteBuffer.allocateDirect(requiredBytes).order(ByteOrder.nativeOrder());
+        }
+        pixelCopyBuffer.clear();
+        pixelCopyBuffer.limit(requiredBytes);
+        return pixelCopyBuffer;
+    }
+
+    private synchronized boolean isClosed() {
+        return closed;
     }
 
     private int[] chooseCaptureSize(int sourceWidth, int sourceHeight) {
@@ -263,6 +305,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
             paddedBitmap.recycle();
             paddedBitmap = null;
         }
+        pixelCopyBuffer = null;
         thread.quitSafely();
     }
 

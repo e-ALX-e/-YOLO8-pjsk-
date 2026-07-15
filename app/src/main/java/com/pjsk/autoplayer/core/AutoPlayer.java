@@ -6,6 +6,7 @@ import com.pjsk.autoplayer.input.TouchInjector;
 import com.pjsk.autoplayer.input.TouchPoint;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -26,6 +27,8 @@ public final class AutoPlayer {
     private final Map<Integer, FlickHint> flickHints = new HashMap<>();
     private final List<Integer> availableTouchIds = new ArrayList<>();
     private final List<DelayedTouchRelease> delayedTouchReleases = new ArrayList<>();
+    private final List<LogicEvent> logicEvents = new ArrayList<>();
+    private final List<LogicGesture> activeLogicGestures = new ArrayList<>();
     private double pxScale = 1.0;
     private double displayScaleX = 1.0;
     private double displayScaleY = 1.0;
@@ -38,6 +41,8 @@ public final class AutoPlayer {
     private int logicTapIntervalMs = 500;
     private double logicTapXRatio = 0.5;
     private double nextLogicTapAtSec = Double.NaN;
+    private double logicStartedAtSec = Double.NaN;
+    private int logicEventIndex;
 
     public AutoPlayer(TouchInjector injector) {
         this(injector, null);
@@ -81,12 +86,29 @@ public final class AutoPlayer {
     }
 
     public void setLogicPlayConfig(boolean enabled, int tapIntervalMs, double tapXRatio) {
+        setLogicPlayConfig(enabled, tapIntervalMs, tapXRatio, null);
+    }
+
+    public void setLogicPlayConfig(
+            boolean enabled,
+            int tapIntervalMs,
+            double tapXRatio,
+            List<LogicEvent> events) {
         if (logicPlayEnabled && !enabled) {
             resetLogicPlayRuntime();
         }
         logicPlayEnabled = enabled;
         logicTapIntervalMs = Math.max(80, Math.min(5000, tapIntervalMs));
         logicTapXRatio = Math.max(0.05, Math.min(0.95, tapXRatio));
+        if (!sameLogicEvents(events)) {
+            logicEvents.clear();
+            if (events != null) {
+                logicEvents.addAll(events);
+            }
+            if (logicPlayActive) {
+                resetLogicPlayRuntime();
+            }
+        }
     }
 
     public boolean isLogicPlayActive() {
@@ -97,12 +119,23 @@ public final class AutoPlayer {
         if (!logicPlayEnabled) {
             return "\u5173";
         }
-        return logicPlayActive ? "\u70b9\u51fb\u4e2d" : "\u7b49\u5f85\u9996\u97f3\u7b26";
+        if (!logicPlayActive) {
+            return "\u7b49\u5f85\u9996\u97f3\u7b26";
+        }
+        if (logicEvents.isEmpty()) {
+            return "\u70b9\u51fb\u4e2d";
+        }
+        if (logicEventIndex >= logicEvents.size() && activeLogicGestures.isEmpty()) {
+            return "\u65f6\u95f4\u8f74\u5b8c\u6210";
+        }
+        return "\u65f6\u95f4\u8f74 " + logicEventIndex + "/" + logicEvents.size();
     }
 
     public void resetLogicPlayRuntime() {
         logicPlayActive = false;
         nextLogicTapAtSec = Double.NaN;
+        logicStartedAtSec = Double.NaN;
+        logicEventIndex = 0;
         releaseAllActiveTouches();
     }
 
@@ -280,28 +313,175 @@ public final class AutoPlayer {
     private void startLogicPlay(double actionY) {
         logicPlayActive = true;
         nextLogicTapAtSec = currentTimestampSec;
+        logicStartedAtSec = currentTimestampSec;
+        logicEventIndex = 0;
         releaseAllActiveTouches();
         noteStates.clear();
         flickHints.clear();
         Log.i(TAG, "logic play started actionY=" + actionY
                 + " intervalMs=" + logicTapIntervalMs
-                + " xRatio=" + logicTapXRatio);
+                + " xRatio=" + logicTapXRatio
+                + " timelineEvents=" + logicEvents.size());
     }
 
     private void processLogicPlay(double actionY) {
         releaseDueTouchIds();
+        updateActiveLogicGestures(actionY);
         if (!clickEnabled) {
             return;
         }
+        if (!logicEvents.isEmpty()) {
+            double elapsedMs = Math.max(0.0, currentTimestampSec - logicStartedAtSec) * 1000.0;
+            int startedThisFrame = 0;
+            while (logicEventIndex < logicEvents.size()
+                    && logicEvents.get(logicEventIndex).timeMs <= elapsedMs
+                    && startedThisFrame < 16) {
+                if (!startLogicEvent(logicEvents.get(logicEventIndex), actionY)) {
+                    break;
+                }
+                logicEventIndex++;
+                startedThisFrame++;
+            }
+            return;
+        }
         if (Double.isNaN(nextLogicTapAtSec) || currentTimestampSec >= nextLogicTapAtSec) {
-            int touchX = toDisplayX(logicTapXRatio * Math.max(1, currentFrameW));
-            int touchY = toDisplayY(actionY);
-            Log.i(TAG, "logic tap x=" + touchX + " y=" + touchY);
-            reportAction("logic", touchX, touchY);
-            injector.down(touchX, touchY, 0);
-            injector.up(0);
+            tapLogicAtRatio(logicTapXRatio, actionY, "logic");
             nextLogicTapAtSec = currentTimestampSec + logicTapIntervalMs / 1000.0;
         }
+    }
+
+    private boolean startLogicEvent(LogicEvent event, double actionY) {
+        int touchId = acquireTouchId();
+        if (touchId < 0) {
+            Log.w(TAG, "logic event delayed: touch id exhausted type=" + event.type);
+            return false;
+        }
+        int startX = toDisplayX(event.xRatio * Math.max(1, currentFrameW));
+        int endX = toDisplayX(event.endXRatio * Math.max(1, currentFrameW));
+        int touchY = toDisplayY(actionY);
+        int endY = LogicEvent.TYPE_FLICK.equals(event.type)
+                ? Math.max(0, toDisplayY(actionY - s(Config.FLICK_DISTANCE)))
+                : touchY;
+        if (LogicEvent.TYPE_TAP.equals(event.type)) {
+            Log.i(TAG, "logic tap x=" + startX + " y=" + touchY + " touchId=" + touchId);
+            reportAction("logic_tap", startX, touchY);
+            injector.down(startX, touchY, touchId);
+            injector.up(touchId);
+            scheduleTouchIdRelease(touchId);
+            return true;
+        }
+
+        Log.i(TAG, "logic " + event.type + " x=" + startX + "->" + endX
+                + " y=" + touchY + " durationMs=" + event.durationMs + " touchId=" + touchId);
+        reportAction("logic_" + event.type, startX, touchY);
+        injector.down(startX, touchY, touchId);
+        activeLogicGestures.add(new LogicGesture(
+                touchId,
+                event.type,
+                startX,
+                endX,
+                touchY,
+                endY,
+                event.points,
+                currentTimestampSec,
+                event.durationMs / 1000.0));
+        return true;
+    }
+
+    private void updateActiveLogicGestures(double actionY) {
+        for (int index = activeLogicGestures.size() - 1; index >= 0; index--) {
+            LogicGesture gesture = activeLogicGestures.get(index);
+            double progress = gesture.durationSec <= 0.0
+                    ? 1.0
+                    : Math.max(0.0, Math.min(1.0,
+                            (currentTimestampSec - gesture.startedAtSec) / gesture.durationSec));
+            if (LogicEvent.TYPE_SWIPE.equals(gesture.type)) {
+                int moveX = gesture.points.isEmpty()
+                        ? (int) Math.round(gesture.startX + (gesture.endX - gesture.startX) * progress)
+                        : logicPathXAtProgress(gesture, progress);
+                injector.move(moveX, gesture.y, gesture.touchId);
+            } else if (LogicEvent.TYPE_FLICK.equals(gesture.type)) {
+                int moveY = (int) Math.round(gesture.y + (gesture.endY - gesture.y) * progress);
+                injector.move(gesture.startX, moveY, gesture.touchId);
+            }
+            if (progress >= 1.0) {
+                if (LogicEvent.TYPE_SWIPE.equals(gesture.type)) {
+                    injector.move(gesture.endX, gesture.y, gesture.touchId);
+                } else if (LogicEvent.TYPE_FLICK.equals(gesture.type)) {
+                    injector.move(gesture.startX, gesture.endY, gesture.touchId);
+                }
+                injector.up(gesture.touchId);
+                scheduleTouchIdRelease(gesture.touchId);
+                activeLogicGestures.remove(index);
+            }
+        }
+    }
+
+    private void tapLogicAtRatio(double xRatio, double actionY, String action) {
+        int touchId = acquireTouchId();
+        if (touchId < 0) {
+            Log.w(TAG, "logic tap skipped: touch id exhausted");
+            return;
+        }
+        int touchX = toDisplayX(xRatio * Math.max(1, currentFrameW));
+        int touchY = toDisplayY(actionY);
+        Log.i(TAG, "logic tap x=" + touchX + " y=" + touchY + " touchId=" + touchId);
+        reportAction(action, touchX, touchY);
+        injector.down(touchX, touchY, touchId);
+        injector.up(touchId);
+        scheduleTouchIdRelease(touchId);
+    }
+
+    private int logicPathXAtProgress(LogicGesture gesture, double progress) {
+        int elapsedMs = (int) Math.round(progress * gesture.durationSec * 1000.0);
+        LogicPoint previous = gesture.points.get(0);
+        for (int index = 1; index < gesture.points.size(); index++) {
+            LogicPoint next = gesture.points.get(index);
+            if (elapsedMs <= next.timeMs) {
+                int spanMs = Math.max(1, next.timeMs - previous.timeMs);
+                double local = Math.max(0.0, Math.min(1.0,
+                        (elapsedMs - previous.timeMs) / (double) spanMs));
+                double xRatio = previous.xRatio + (next.xRatio - previous.xRatio) * local;
+                return toDisplayX(xRatio * Math.max(1, currentFrameW));
+            }
+            previous = next;
+        }
+        return gesture.endX;
+    }
+
+    private boolean sameLogicEvents(List<LogicEvent> events) {
+        int size = events == null ? 0 : events.size();
+        if (logicEvents.size() != size) {
+            return false;
+        }
+        for (int index = 0; index < size; index++) {
+            LogicEvent existing = logicEvents.get(index);
+            LogicEvent candidate = events.get(index);
+            if (existing.timeMs != candidate.timeMs
+                    || existing.durationMs != candidate.durationMs
+                    || !existing.type.equals(candidate.type)
+                    || Double.compare(existing.xRatio, candidate.xRatio) != 0
+                    || Double.compare(existing.endXRatio, candidate.endXRatio) != 0
+                    || !sameLogicPoints(existing.points, candidate.points)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean sameLogicPoints(List<LogicPoint> left, List<LogicPoint> right) {
+        if (left.size() != right.size()) {
+            return false;
+        }
+        for (int index = 0; index < left.size(); index++) {
+            LogicPoint leftPoint = left.get(index);
+            LogicPoint rightPoint = right.get(index);
+            if (leftPoint.timeMs != rightPoint.timeMs
+                    || Double.compare(leftPoint.xRatio, rightPoint.xRatio) != 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void updateFlickHints(List<NoteTrack> confirmedTracks, double actionY) {
@@ -522,6 +702,11 @@ public final class AutoPlayer {
     private void releaseAllActiveTouches() {
         flickHints.clear();
         delayedTouchReleases.clear();
+        for (LogicGesture gesture : activeLogicGestures) {
+            injector.up(gesture.touchId);
+            scheduleTouchIdRelease(gesture.touchId);
+        }
+        activeLogicGestures.clear();
         for (NoteState ns : noteStates.values()) {
             if (ns.touchId >= 0) {
                 Log.i(TAG, "no click mode release touchId=" + ns.touchId);
@@ -560,6 +745,93 @@ public final class AutoPlayer {
 
         PendingRelease(NoteState noteState) {
             this.noteState = noteState;
+        }
+    }
+
+    public static final class LogicEvent {
+        public static final String TYPE_TAP = "tap";
+        public static final String TYPE_HOLD = "hold";
+        public static final String TYPE_SWIPE = "swipe";
+        public static final String TYPE_FLICK = "flick";
+
+        public final int timeMs;
+        public final String type;
+        public final double xRatio;
+        public final double endXRatio;
+        public final int durationMs;
+        public final List<LogicPoint> points;
+
+        public LogicEvent(
+                int timeMs,
+                String type,
+                double xRatio,
+                double endXRatio,
+                int durationMs) {
+            this(timeMs, type, xRatio, endXRatio, durationMs, null);
+        }
+
+        public LogicEvent(
+                int timeMs,
+                String type,
+                double xRatio,
+                double endXRatio,
+                int durationMs,
+                List<LogicPoint> points) {
+            this.timeMs = timeMs;
+            this.type = TYPE_HOLD.equals(type) || TYPE_SWIPE.equals(type) || TYPE_FLICK.equals(type)
+                    ? type
+                    : TYPE_TAP;
+            this.xRatio = Math.max(0.05, Math.min(0.95, xRatio));
+            this.endXRatio = Math.max(0.05, Math.min(0.95, endXRatio));
+            this.durationMs = Math.max(0, durationMs);
+            this.points = points == null || points.isEmpty()
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(points));
+        }
+    }
+
+    public static final class LogicPoint {
+        public final int timeMs;
+        public final double xRatio;
+
+        public LogicPoint(int timeMs, double xRatio) {
+            this.timeMs = Math.max(0, timeMs);
+            this.xRatio = Math.max(0.05, Math.min(0.95, xRatio));
+        }
+    }
+
+    private static final class LogicGesture {
+        final int touchId;
+        final String type;
+        final int startX;
+        final int endX;
+        final int y;
+        final int endY;
+        final List<LogicPoint> points;
+        final double startedAtSec;
+        final double durationSec;
+
+        LogicGesture(
+                int touchId,
+                String type,
+                int startX,
+                int endX,
+                int y,
+                int endY,
+                List<LogicPoint> points,
+                double startedAtSec,
+                double durationSec) {
+            this.touchId = touchId;
+            this.type = type;
+            this.startX = startX;
+            this.endX = endX;
+            this.y = y;
+            this.endY = endY;
+            this.points = points == null || points.isEmpty()
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(points));
+            this.startedAtSec = startedAtSec;
+            this.durationSec = durationSec;
         }
     }
 

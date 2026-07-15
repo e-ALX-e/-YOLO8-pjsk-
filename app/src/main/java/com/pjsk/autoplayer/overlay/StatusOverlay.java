@@ -403,6 +403,8 @@ public final class StatusOverlay {
                 color = Color.rgb(255, 194, 87);
             } else if (AutoContinueController.STATUS_SELECT_SONG.equals(autoContinueStatus)) {
                 color = Color.rgb(126, 214, 255);
+            } else if (AutoContinueController.STATUS_WAIT_LOADING.equals(autoContinueStatus)) {
+                color = Color.rgb(215, 169, 255);
             } else if (clickBlocked) {
                 color = Color.rgb(255, 102, 102);
             } else {
@@ -424,6 +426,9 @@ public final class StatusOverlay {
         } else if (AutoContinueController.STATUS_SELECT_SONG.equals(autoContinueStatus)) {
             textColor = Color.rgb(126, 214, 255);
             backgroundColor = Color.argb(80, 76, 169, 255);
+        } else if (AutoContinueController.STATUS_WAIT_LOADING.equals(autoContinueStatus)) {
+            textColor = Color.rgb(215, 169, 255);
+            backgroundColor = Color.argb(80, 164, 96, 210);
         } else {
             textColor = Color.rgb(94, 232, 142);
             backgroundColor = Color.argb(80, 64, 200, 118);
