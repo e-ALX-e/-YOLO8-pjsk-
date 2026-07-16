@@ -261,12 +261,16 @@ public final class CaptureService extends Service {
 
             if (currentAutoContinueController != null) {
                 updateClickMode(currentAutoPlayer);
-                currentAutoContinueController.onFrame(
-                        frame.bitmap,
-                        frame.displayWidth,
-                        frame.displayHeight,
-                        isClickBlockedNow(),
-                        Collections.emptyList());
+                // A logic timeline determines its own end. Do not run LIVE CLEAR image detection
+                // while it is actively playing, otherwise a false match can interrupt the timeline.
+                if (!logicPlayEnabled || !currentAutoPlayer.isLogicPlayActive()) {
+                    currentAutoContinueController.onFrame(
+                            frame.bitmap,
+                            frame.displayWidth,
+                            frame.displayHeight,
+                            isClickBlockedNow(),
+                            Collections.emptyList());
+                }
                 autoContinueStatus = currentAutoContinueController.statusText();
                 if (currentAutoContinueController.shouldSuppressGameRecognition()) {
                     currentAutoPlayer.setClickEnabled(false);
@@ -284,6 +288,9 @@ public final class CaptureService extends Service {
             if (currentAutoPlayer.isLogicPlayActive()) {
                 updateClickMode(currentAutoPlayer);
                 handleLogicPlayFrame(frame, inferenceStartMs, currentAutoPlayer);
+                if (currentAutoPlayer.isLogicPlayFinished()) {
+                    finishLogicPlay(currentAutoPlayer, currentAutoContinueController);
+                }
                 return;
             }
 
@@ -475,6 +482,18 @@ public final class CaptureService extends Service {
                     + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
                     + " logic=" + currentAutoPlayer.logicPlayStatus());
         }
+    }
+
+    private void finishLogicPlay(
+            AutoPlayer currentAutoPlayer,
+            AutoContinueController currentAutoContinueController) {
+        currentAutoPlayer.resetLogicPlayRuntime();
+        currentAutoPlayer.setClickEnabled(false);
+        if (currentAutoContinueController != null) {
+            currentAutoContinueController.forceGameEnded();
+            autoContinueStatus = currentAutoContinueController.statusText();
+        }
+        Log.i(TAG, "logic timeline completed, switching to game ended state");
     }
 
     private void updateAutoSoloRuntime(boolean enabled) {

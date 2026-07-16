@@ -115,6 +115,17 @@ public final class AutoPlayer {
         return logicPlayEnabled && logicPlayActive;
     }
 
+    /**
+     * 只有带时间轴的逻辑才能自然结束。空时间轴的固定连点模式会持续运行，直到用户手动停止。
+     */
+    public boolean isLogicPlayFinished() {
+        return logicPlayEnabled
+                && logicPlayActive
+                && !logicEvents.isEmpty()
+                && logicEventIndex >= logicEvents.size()
+                && activeLogicGestures.isEmpty();
+    }
+
     public String logicPlayStatus() {
         if (!logicPlayEnabled) {
             return "\u5173";
