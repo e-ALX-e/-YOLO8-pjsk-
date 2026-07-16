@@ -320,8 +320,8 @@ public final class AutoContinueController {
     private boolean isLifeHudVisible(Bitmap frame) {
         // The white LIFE label alone is common in menus. Pair it with the narrower,
         // saturated green health bar region to avoid treating menu controls as the HUD.
-        return whiteRatio(frame, 0.735, 0.008, 0.805, 0.055) > 0.055
-                && lifeGreenRatio(frame, 0.755, 0.045, 0.885, 0.095) > 0.16;
+        return whiteRatio(frame, 0.735, 0.008, 0.805, 0.055) > 0.035
+                && lifeGreenRatio(frame, 0.755, 0.045, 0.885, 0.095) > 0.08;
     }
 
     private double whiteRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -377,7 +377,7 @@ public final class AutoContinueController {
         PixelTest WHITE = (r, g, b) -> r > 210 && g > 210 && b > 210;
         PixelTest CYAN = (r, g, b) -> g > 130 && b > 130 && r < 200;
         PixelTest GREEN = (r, g, b) -> g > 150 && b > 120 && r < 190;
-        PixelTest LIFE_GREEN = (r, g, b) -> g > 165 && g > r + 35 && g > b + 10;
+        PixelTest LIFE_GREEN = (r, g, b) -> g > 140 && g > r + 20 && g > b - 5;
         PixelTest DARK = (r, g, b) -> r < 95 && g < 95 && b < 130;
 
         boolean matches(int r, int g, int b);
