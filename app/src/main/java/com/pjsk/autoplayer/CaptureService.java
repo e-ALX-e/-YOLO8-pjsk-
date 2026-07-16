@@ -12,6 +12,7 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 
@@ -58,6 +59,7 @@ public final class CaptureService extends Service {
     private static volatile boolean running;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService startupWorker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean processing = new AtomicBoolean(false);
     private final AtomicBoolean projectionRecoveryPending = new AtomicBoolean(false);
     private final Object metricsLock = new Object();
@@ -140,7 +142,10 @@ public final class CaptureService extends Service {
         if (ACTION_START.equals(action)) {
             int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
             Intent resultData = intent.getParcelableExtra(EXTRA_RESULT_DATA);
-            startCapture(resultCode, resultData);
+            // NCNN model creation can take several seconds. Never do it from the service main
+            // thread, otherwise the activity sharing this process will receive an input ANR.
+            updateNotification("\u6b63\u5728\u521d\u59cb\u5316\u6a21\u578b");
+            startupWorker.execute(() -> startCapture(resultCode, resultData));
             return START_STICKY;
         }
 
@@ -497,6 +502,12 @@ public final class CaptureService extends Service {
     }
 
     private void updateAutoSoloRuntime(boolean enabled) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            // Toggling modes from the overlay runs on the main thread. UI model construction must
+            // follow the same background path as normal capture startup.
+            startupWorker.execute(() -> updateAutoSoloRuntime(enabled));
+            return;
+        }
         if (!enabled) {
             autoContinueController = null;
             if (uiButtonDetector != null) {
@@ -516,7 +527,11 @@ public final class CaptureService extends Service {
         }
         if (autoContinueController == null) {
             autoContinueController = new AutoContinueController(injector, uiButtonDetector);
-            autoContinueController.reset();
+            if (AppSettings.isLogicPlayModeEnabled(this)) {
+                autoContinueController.forceWaitLoading();
+            } else {
+                autoContinueController.reset();
+            }
             autoContinueStatus = autoContinueController.statusText();
         }
     }
@@ -979,6 +994,7 @@ public final class CaptureService extends Service {
     @Override
     public void onDestroy() {
         stopEverything();
+        startupWorker.shutdownNow();
         worker.shutdownNow();
         super.onDestroy();
     }
