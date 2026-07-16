@@ -29,8 +29,8 @@ public final class AutoContinueController {
     private static final long PLAY_WAIT_TIMEOUT_MS = 2000;
     private static final long PLAY_BUTTON_GONE_CONFIRM_MS = 2000;
     private static final long GAME_END_AFTER_START_GUARD_MS = 10000;
-    // LIFE HUD is sampled on every captured frame while loading. Require a stable signal before starting playback.
-    private static final int LIFE_HUD_CONFIRMATION_COUNT = 3;
+    // The judgement track is sampled on every captured frame while loading.
+    private static final int TRACK_CONFIRMATION_COUNT = 3;
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
     private static final double RESULT_CONTINUE_Y = 800.0 / 887.0;
@@ -48,7 +48,7 @@ public final class AutoContinueController {
     private long liveClearBlockedUntilMs;
     private long lastNoteSeenMs;
     private long lastPlayButtonSeenMs;
-    private int lifeHudConfirmationCount;
+    private int trackConfirmationCount;
     private List<Detection> lastButtonDetections = Collections.emptyList();
 
     public AutoContinueController(TouchInjector injector, UiButtonDetector buttonDetector) {
@@ -65,7 +65,7 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
-        lifeHudConfirmationCount = 0;
+        trackConfirmationCount = 0;
         lastButtonDetections = Collections.emptyList();
     }
 
@@ -78,13 +78,13 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
-        lifeHudConfirmationCount = 0;
+        trackConfirmationCount = 0;
         lastButtonDetections = Collections.emptyList();
         Log.i(TAG, "forced game ended state");
     }
 
     /**
-     * 逻辑演奏从已进入谱面加载流程的场景启动：预热模型，但在 LIFE 出现前不执行音符操作。
+     * 逻辑演奏从已进入谱面加载流程的场景启动：预热模型，但在轨道出现前不执行音符操作。
      */
     public void forceWaitLoading() {
         state = State.WAIT_LOADING;
@@ -95,9 +95,9 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
-        lifeHudConfirmationCount = 0;
+        trackConfirmationCount = 0;
         lastButtonDetections = Collections.emptyList();
-        Log.i(TAG, "forced waiting for LIFE HUD state");
+        Log.i(TAG, "forced waiting for judgement track state");
     }
 
     public boolean shouldSuppressGameRecognition() {
@@ -172,20 +172,20 @@ public final class AutoContinueController {
 
             case State.WAIT_LOADING:
                 lastButtonDetections = Collections.emptyList();
-                if (isLifeHudVisible(frame)) {
-                    lifeHudConfirmationCount++;
+                if (isJudgementTrackVisible(frame)) {
+                    trackConfirmationCount++;
                 } else {
-                    lifeHudConfirmationCount = 0;
+                    trackConfirmationCount = 0;
                 }
-                if (lifeHudConfirmationCount >= LIFE_HUD_CONFIRMATION_COUNT) {
+                if (trackConfirmationCount >= TRACK_CONFIRMATION_COUNT) {
                     state = State.PLAYING;
                     lastTapMs = 0L;
                     waitUntilMs = 0L;
                     playWaitStartMs = 0L;
                     lastPlayButtonSeenMs = 0L;
-                    lifeHudConfirmationCount = 0;
+                    trackConfirmationCount = 0;
                     liveClearBlockedUntilMs = now + GAME_END_AFTER_START_GUARD_MS;
-                    Log.i(TAG, "LIFE HUD detected, switching to playing");
+                    Log.i(TAG, "judgement track detected, switching to playing");
                 }
                 break;
         }
@@ -250,7 +250,7 @@ public final class AutoContinueController {
                 waitUntilMs = 0L;
                 playWaitStartMs = 0L;
                 lastPlayButtonSeenMs = 0L;
-                Log.i(TAG, "play button disappeared for 2s after tap, waiting for LIFE HUD");
+                Log.i(TAG, "play button disappeared for 2s after tap, waiting for judgement track");
             }
             return;
         }
@@ -318,15 +318,12 @@ public final class AutoContinueController {
     }
 
     /**
-     * The gameplay HUD always puts white LIFE text directly above a green
-     * health bar at the top right. This tiny color check replaces full note
-     * inference while the chart is loading.
+     * The gameplay lane has two long purple horizontal edges near the judgement area.
+     * Unlike the HUD, this geometry is stable across backgrounds and song jackets.
      */
-    private boolean isLifeHudVisible(Bitmap frame) {
-        // The white LIFE label alone is common in menus. Pair it with the narrower,
-        // saturated green health bar region to avoid treating menu controls as the HUD.
-        return whiteRatio(frame, 0.735, 0.008, 0.805, 0.055) > 0.035
-                && lifeGreenRatio(frame, 0.755, 0.045, 0.885, 0.095) > 0.08;
+    private boolean isJudgementTrackVisible(Bitmap frame) {
+        return hasPurpleHorizontalLine(frame, 0.742, 0.772, 0.15, 0.85, 0.35)
+                && hasPurpleHorizontalLine(frame, 0.810, 0.840, 0.15, 0.85, 0.35);
     }
 
     private double whiteRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -341,8 +338,32 @@ public final class AutoContinueController {
         return ratio(frame, x1, y1, x2, y2, PixelTest.GREEN);
     }
 
-    private double lifeGreenRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
-        return ratio(frame, x1, y1, x2, y2, PixelTest.LIFE_GREEN);
+    private boolean hasPurpleHorizontalLine(
+            Bitmap frame, double y1, double y2, double x1, double x2, double minRatio) {
+        int width = frame.getWidth();
+        int height = frame.getHeight();
+        int left = clamp((int) Math.round(x1 * width), 0, width - 1);
+        int right = clamp((int) Math.round(x2 * width), left + 1, width);
+        int top = clamp((int) Math.round(y1 * height), 0, height - 1);
+        int bottom = clamp((int) Math.round(y2 * height), top + 1, height);
+        for (int y = top; y < bottom; y++) {
+            int matched = 0;
+            int total = 0;
+            for (int x = left; x < right; x += 2) {
+                int color = frame.getPixel(x, y);
+                int r = (color >> 16) & 0xff;
+                int g = (color >> 8) & 0xff;
+                int b = color & 0xff;
+                total++;
+                if (PixelTest.TRACK_PURPLE.matches(r, g, b)) {
+                    matched++;
+                }
+            }
+            if (total > 0 && matched / (double) total >= minRatio) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private double darkRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -382,7 +403,7 @@ public final class AutoContinueController {
         PixelTest WHITE = (r, g, b) -> r > 210 && g > 210 && b > 210;
         PixelTest CYAN = (r, g, b) -> g > 130 && b > 130 && r < 200;
         PixelTest GREEN = (r, g, b) -> g > 150 && b > 120 && r < 190;
-        PixelTest LIFE_GREEN = (r, g, b) -> g > 140 && g > r + 20 && g > b - 5;
+        PixelTest TRACK_PURPLE = (r, g, b) -> r > 90 && b > 140 && r > g + 8 && b > g + 35;
         PixelTest DARK = (r, g, b) -> r < 95 && g < 95 && b < 130;
 
         boolean matches(int r, int g, int b);
