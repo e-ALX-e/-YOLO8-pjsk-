@@ -781,6 +781,7 @@ public final class CaptureService extends Service {
                     this::toggleNoClickMode,
                     this::toggleAutoSoloMode,
                     this::toggleLogicPlayMode,
+                    this::resetPlaybackState,
                     this::toggleDebugDisplay);
         }
         statusOverlay.show(text);
@@ -840,6 +841,33 @@ public final class CaptureService extends Service {
             statusOverlay.setAutoContinueStatus(autoContinueStatus);
         }
         updateNotification(enabled ? "\u5df2\u5f00\u542f\u903b\u8f91\u6f14\u594f\u6a21\u5f0f\uff0c\u7b49\u5f85 LIFE \u52a0\u8f7d" : "\u5df2\u5173\u95ed\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
+    }
+
+    private void resetPlaybackState() {
+        AutoPlayer currentAutoPlayer = autoPlayer;
+        if (currentAutoPlayer != null) {
+            currentAutoPlayer.resetLogicPlayRuntime();
+        }
+
+        if (shouldRunAutoContinue()) {
+            updateAutoSoloRuntime(true);
+        }
+        if (autoContinueController != null) {
+            if (AppSettings.isLogicPlayModeEnabled(this)) {
+                autoContinueController.forceWaitLoading();
+            } else {
+                autoContinueController.reset();
+            }
+            autoContinueStatus = autoContinueController.statusText();
+        } else {
+            autoContinueStatus = AutoContinueController.STATUS_PLAYING;
+        }
+
+        if (statusOverlay != null) {
+            statusOverlay.setAutoContinueStatus(autoContinueStatus);
+        }
+        updateNotification("\u5df2\u91cd\u7f6e\u8fd0\u884c\u72b6\u6001\uff1a" + autoContinueStatus);
+        Log.i(TAG, "playback state reset to " + autoContinueStatus);
     }
 
     private void toggleDebugDisplay() {

@@ -31,6 +31,7 @@ public final class StatusOverlay {
     private final Runnable onNoClickClick;
     private final Runnable onAutoSoloClick;
     private final Runnable onLogicPlayClick;
+    private final Runnable onResetStateClick;
     private final Runnable onDebugDisplayClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -48,6 +49,7 @@ public final class StatusOverlay {
     private Button noClickButton;
     private Button autoSoloButton;
     private Button logicPlayButton;
+    private Button resetStateButton;
     private Button debugDisplayButton;
     private boolean collapsed;
     private boolean parametersVisible;
@@ -68,6 +70,7 @@ public final class StatusOverlay {
             Runnable onNoClickClick,
             Runnable onAutoSoloClick,
             Runnable onLogicPlayClick,
+            Runnable onResetStateClick,
             Runnable onDebugDisplayClick) {
         this.context = context.getApplicationContext();
         this.onStopClick = onStopClick;
@@ -75,6 +78,7 @@ public final class StatusOverlay {
         this.onNoClickClick = onNoClickClick;
         this.onAutoSoloClick = onAutoSoloClick;
         this.onLogicPlayClick = onLogicPlayClick;
+        this.onResetStateClick = onResetStateClick;
         this.onDebugDisplayClick = onDebugDisplayClick;
     }
 
@@ -326,6 +330,10 @@ public final class StatusOverlay {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout thirdRow = makeButtonRow();
+        resetStateButton = makeSmallButton("\u91cd\u7f6e\u72b6\u6001");
+        resetStateButton.setOnClickListener(v -> onResetStateClick.run());
+        thirdRow.addView(resetStateButton, makeGridButtonParams(true));
+
         Button stop = makeSmallButton("\u505c\u6b62");
         stop.setOnClickListener(v -> onStopClick.run());
         thirdRow.addView(stop, makeGridButtonParams(false));
@@ -494,6 +502,7 @@ public final class StatusOverlay {
         noClickButton = null;
         autoSoloButton = null;
         logicPlayButton = null;
+        resetStateButton = null;
         debugDisplayButton = null;
         params = null;
         parametersVisible = false;
