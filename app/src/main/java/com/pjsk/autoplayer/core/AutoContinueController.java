@@ -23,14 +23,13 @@ public final class AutoContinueController {
 
     private static final long PLAYING_DETECTION_INTERVAL_MS = 500;
     private static final long ACTIVE_DETECTION_INTERVAL_MS = 250;
-    private static final long WAIT_LOADING_DETECTION_INTERVAL_MS = 100;
     private static final long CONTINUE_TAP_REPEAT_MS = 500;
     private static final long PAGE_TAP_REPEAT_MS = 900;
     private static final long BUTTON_TAP_REPEAT_MS = 500;
     private static final long PLAY_WAIT_TIMEOUT_MS = 2000;
     private static final long PLAY_BUTTON_GONE_CONFIRM_MS = 2000;
     private static final long GAME_END_AFTER_START_GUARD_MS = 10000;
-    // LIFE HUD is sampled every 100ms while loading. Require a stable signal before starting playback.
+    // LIFE HUD is sampled on every captured frame while loading. Require a stable signal before starting playback.
     private static final int LIFE_HUD_CONFIRMATION_COUNT = 3;
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
@@ -264,7 +263,7 @@ public final class AutoContinueController {
 
     private long detectionIntervalMs() {
         if (state == State.WAIT_LOADING) {
-            return WAIT_LOADING_DETECTION_INTERVAL_MS;
+            return 0L;
         }
         return state == State.PLAYING
                 ? PLAYING_DETECTION_INTERVAL_MS
