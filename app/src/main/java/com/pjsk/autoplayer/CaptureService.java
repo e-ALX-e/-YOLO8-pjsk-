@@ -214,7 +214,6 @@ public final class CaptureService extends Service {
 
             @Override
             public void onFrame(ScreenCaptureSource.Frame frame) {
-                launchCaptureTargetAfterReady();
                 worker.execute(() -> processFrame(frame));
             }
 
@@ -238,17 +237,18 @@ public final class CaptureService extends Service {
             }
         });
         captureSource.start();
+        launchCaptureTargetAfterDisplayReady();
 
         updateVisibleStatus(formatStatus(0), true);
     }
 
     /**
-     * Do not leave the permission activity on a fixed timer. The first frame confirms
-     * that the virtual display and the floating status window have both been attached.
-     * Launching the selected game only after this point avoids losing the projection
-     * during the start-up race on some devices.
+     * A single-app projection may not emit a frame until its selected game is foreground.
+     * Waiting for the first frame would therefore deadlock at a black preview. Returning
+     * from createVirtualDisplay confirms the capture surface is ready, while the overlay
+     * was already shown above; that is the safe point to open the selected game.
      */
-    private void launchCaptureTargetAfterReady() {
+    private void launchCaptureTargetAfterDisplayReady() {
         if (!captureTargetLaunchPending.compareAndSet(true, false)) {
             return;
         }
