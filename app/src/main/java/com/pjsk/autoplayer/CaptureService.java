@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -46,6 +47,7 @@ public final class CaptureService extends Service {
     public static final String EXTRA_RESULT_CODE = "resultCode";
     public static final String EXTRA_RESULT_DATA = "resultData";
     public static final String EXTRA_PREVIEW_ENABLED = "previewEnabled";
+    public static final String EXTRA_LAUNCH_CAPTURE_TARGET = "launchCaptureTarget";
 
     private static final String TAG = "PJSK-CaptureService";
     private static final String CHANNEL_ID = "pjsk_capture";
@@ -62,6 +64,8 @@ public final class CaptureService extends Service {
     private final ExecutorService startupWorker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean processing = new AtomicBoolean(false);
     private final AtomicBoolean projectionRecoveryPending = new AtomicBoolean(false);
+    private final AtomicBoolean captureTargetLaunchPending = new AtomicBoolean(false);
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Object metricsLock = new Object();
 
     private ScreenCaptureSource captureSource;
@@ -142,17 +146,20 @@ public final class CaptureService extends Service {
         if (ACTION_START.equals(action)) {
             int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
             Intent resultData = intent.getParcelableExtra(EXTRA_RESULT_DATA);
+            boolean launchCaptureTarget = intent.getBooleanExtra(
+                    EXTRA_LAUNCH_CAPTURE_TARGET,
+                    false);
             // NCNN model creation can take several seconds. Never do it from the service main
             // thread, otherwise the activity sharing this process will receive an input ANR.
             updateNotification("\u6b63\u5728\u521d\u59cb\u5316\u6a21\u578b");
-            startupWorker.execute(() -> startCapture(resultCode, resultData));
+            startupWorker.execute(() -> startCapture(resultCode, resultData, launchCaptureTarget));
             return START_STICKY;
         }
 
         return START_NOT_STICKY;
     }
 
-    private void startCapture(int resultCode, Intent resultData) {
+    private void startCapture(int resultCode, Intent resultData, boolean launchCaptureTarget) {
         if (resultData == null) {
             Log.e(TAG, "missing MediaProjection result data");
             updateNotification("启动失败：缺少录屏授权");
@@ -160,6 +167,7 @@ public final class CaptureService extends Service {
         }
 
         stopEverything();
+        captureTargetLaunchPending.set(launchCaptureTarget);
         running = true;
         projectionRecoveryPending.set(false);
 
@@ -206,6 +214,7 @@ public final class CaptureService extends Service {
 
             @Override
             public void onFrame(ScreenCaptureSource.Frame frame) {
+                launchCaptureTargetAfterReady();
                 worker.execute(() -> processFrame(frame));
             }
 
@@ -231,6 +240,40 @@ public final class CaptureService extends Service {
         captureSource.start();
 
         updateVisibleStatus(formatStatus(0), true);
+    }
+
+    /**
+     * Do not leave the permission activity on a fixed timer. The first frame confirms
+     * that the virtual display and the floating status window have both been attached.
+     * Launching the selected game only after this point avoids losing the projection
+     * during the start-up race on some devices.
+     */
+    private void launchCaptureTargetAfterReady() {
+        if (!captureTargetLaunchPending.compareAndSet(true, false)) {
+            return;
+        }
+        mainHandler.postDelayed(() -> {
+            if (!running || projectionRecoveryPending.get()) {
+                return;
+            }
+            String packageName = AppSettings.captureTargetPackage(this);
+            if (packageName.isEmpty()) {
+                return;
+            }
+            Intent launchIntent = getPackageManager().getLaunchIntentForPackage(packageName);
+            if (launchIntent == null) {
+                Log.w(TAG, "capture target is no longer installed: " + packageName);
+                return;
+            }
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            try {
+                startActivity(launchIntent);
+                Log.i(TAG, "capture ready; opened target " + packageName);
+            } catch (RuntimeException error) {
+                Log.e(TAG, "failed to open capture target", error);
+            }
+        }, 250L);
     }
 
     private void processFrame(ScreenCaptureSource.Frame frame) {
@@ -750,6 +793,7 @@ public final class CaptureService extends Service {
     }
 
     private void stopEverything() {
+        captureTargetLaunchPending.set(false);
         releaseRuntime();
         running = false;
         if (previewOverlay != null) {

@@ -870,14 +870,14 @@ public final class MainActivity extends Activity {
         Intent service = new Intent(this, CaptureService.class)
                 .setAction(CaptureService.ACTION_START)
                 .putExtra(CaptureService.EXTRA_RESULT_CODE, resultCode)
-                .putExtra(CaptureService.EXTRA_RESULT_DATA, data);
+                .putExtra(CaptureService.EXTRA_RESULT_DATA, data)
+                .putExtra(CaptureService.EXTRA_LAUNCH_CAPTURE_TARGET, true);
 
         if (Build.VERSION.SDK_INT >= 26) {
             startForegroundService(service);
         } else {
             startService(service);
         }
-        getWindow().getDecorView().postDelayed(this::launchCaptureTarget, 350L);
         Toast.makeText(this, "\u5f55\u5c4f\u6388\u6743\u5b8c\u6210\uff0c\u91c7\u96c6\u5df2\u6062\u590d", Toast.LENGTH_LONG).show();
         statusView.setText("状态：已启动，正在切换到录屏目标");
     }
