@@ -78,6 +78,22 @@ public final class AutoContinueController {
         Log.i(TAG, "forced game ended state");
     }
 
+    /**
+     * 逻辑演奏从已进入谱面加载流程的场景启动：预热模型，但在 LIFE 出现前不执行音符操作。
+     */
+    public void forceWaitLoading() {
+        state = State.WAIT_LOADING;
+        lastDetectMs = 0L;
+        lastTapMs = 0L;
+        waitUntilMs = 0L;
+        playWaitStartMs = 0L;
+        liveClearBlockedUntilMs = 0L;
+        lastNoteSeenMs = 0L;
+        lastPlayButtonSeenMs = 0L;
+        lastButtonDetections = Collections.emptyList();
+        Log.i(TAG, "forced waiting for LIFE HUD state");
+    }
+
     public boolean shouldSuppressGameRecognition() {
         return state != State.PLAYING;
     }

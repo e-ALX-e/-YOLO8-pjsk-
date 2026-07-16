@@ -167,7 +167,7 @@ public final class CaptureService extends Service {
         resetCounters();
         previousLogicPlayMode = AppSettings.isLogicPlayModeEnabled(this);
         if (previousLogicPlayMode) {
-            forceLogicPlayGameEnded(autoPlayer);
+            forceLogicPlayWaitLoading(autoPlayer);
         }
         previousNoClickMode = AppSettings.isNoClickMode(this);
         clickResumeAtMs = 0L;
@@ -244,7 +244,7 @@ public final class CaptureService extends Service {
             boolean logicPlayEnabled = AppSettings.isLogicPlayModeEnabled(this);
             if (logicPlayEnabled && !previousLogicPlayMode) {
                 AppSettings.setAutoSoloModeEnabled(this, true);
-                forceLogicPlayGameEnded(currentAutoPlayer);
+                forceLogicPlayWaitLoading(currentAutoPlayer);
             }
             previousLogicPlayMode = logicPlayEnabled;
 
@@ -431,11 +431,11 @@ public final class CaptureService extends Service {
                 || AppSettings.isLogicPlayModeEnabled(this);
     }
 
-    private void forceLogicPlayGameEnded(AutoPlayer currentAutoPlayer) {
+    private void forceLogicPlayWaitLoading(AutoPlayer currentAutoPlayer) {
         AppSettings.setAutoSoloModeEnabled(this, true);
         updateAutoSoloRuntime(true);
         if (autoContinueController != null) {
-            autoContinueController.forceGameEnded();
+            autoContinueController.forceWaitLoading();
             autoContinueStatus = autoContinueController.statusText();
         }
         if (currentAutoPlayer != null) {
@@ -807,7 +807,7 @@ public final class CaptureService extends Service {
         AppSettings.setLogicPlayModeEnabled(this, enabled);
         AutoPlayer currentAutoPlayer = autoPlayer;
         if (enabled) {
-            forceLogicPlayGameEnded(currentAutoPlayer);
+            forceLogicPlayWaitLoading(currentAutoPlayer);
             previousLogicPlayMode = true;
         } else {
             previousLogicPlayMode = false;
@@ -820,7 +820,7 @@ public final class CaptureService extends Service {
             statusOverlay.setLogicPlayMode(enabled);
             statusOverlay.setAutoContinueStatus(autoContinueStatus);
         }
-        updateNotification(enabled ? "\u5df2\u5f00\u542f\u903b\u8f91\u6f14\u594f\u6a21\u5f0f\uff0c\u5148\u8fdb\u5165\u6e38\u620f\u7ed3\u675f\u6d41\u7a0b" : "\u5df2\u5173\u95ed\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
+        updateNotification(enabled ? "\u5df2\u5f00\u542f\u903b\u8f91\u6f14\u594f\u6a21\u5f0f\uff0c\u7b49\u5f85 LIFE \u52a0\u8f7d" : "\u5df2\u5173\u95ed\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
     }
 
     private void toggleDebugDisplay() {
