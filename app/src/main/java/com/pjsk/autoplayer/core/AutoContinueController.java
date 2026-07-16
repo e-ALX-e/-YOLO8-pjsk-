@@ -29,6 +29,8 @@ public final class AutoContinueController {
     private static final long PLAY_WAIT_TIMEOUT_MS = 2000;
     private static final long PLAY_BUTTON_GONE_CONFIRM_MS = 2000;
     private static final long GAME_END_AFTER_START_GUARD_MS = 10000;
+    // LIFE HUD is sampled every 250ms while loading. Require a stable signal before starting playback.
+    private static final int LIFE_HUD_CONFIRMATION_COUNT = 3;
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
     private static final double RESULT_CONTINUE_Y = 800.0 / 887.0;
@@ -46,6 +48,7 @@ public final class AutoContinueController {
     private long liveClearBlockedUntilMs;
     private long lastNoteSeenMs;
     private long lastPlayButtonSeenMs;
+    private int lifeHudConfirmationCount;
     private List<Detection> lastButtonDetections = Collections.emptyList();
 
     public AutoContinueController(TouchInjector injector, UiButtonDetector buttonDetector) {
@@ -62,6 +65,7 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
+        lifeHudConfirmationCount = 0;
         lastButtonDetections = Collections.emptyList();
     }
 
@@ -74,6 +78,7 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
+        lifeHudConfirmationCount = 0;
         lastButtonDetections = Collections.emptyList();
         Log.i(TAG, "forced game ended state");
     }
@@ -90,6 +95,7 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
+        lifeHudConfirmationCount = 0;
         lastButtonDetections = Collections.emptyList();
         Log.i(TAG, "forced waiting for LIFE HUD state");
     }
@@ -162,11 +168,17 @@ public final class AutoContinueController {
             case State.WAIT_LOADING:
                 lastButtonDetections = Collections.emptyList();
                 if (isLifeHudVisible(frame)) {
+                    lifeHudConfirmationCount++;
+                } else {
+                    lifeHudConfirmationCount = 0;
+                }
+                if (lifeHudConfirmationCount >= LIFE_HUD_CONFIRMATION_COUNT) {
                     state = State.PLAYING;
                     lastTapMs = 0L;
                     waitUntilMs = 0L;
                     playWaitStartMs = 0L;
                     lastPlayButtonSeenMs = 0L;
+                    lifeHudConfirmationCount = 0;
                     liveClearBlockedUntilMs = now + GAME_END_AFTER_START_GUARD_MS;
                     Log.i(TAG, "LIFE HUD detected, switching to playing");
                 }
@@ -303,8 +315,10 @@ public final class AutoContinueController {
      * inference while the chart is loading.
      */
     private boolean isLifeHudVisible(Bitmap frame) {
-        return whiteRatio(frame, 0.725, 0.010, 0.845, 0.075) > 0.04
-                && greenRatio(frame, 0.705, 0.035, 0.885, 0.105) > 0.06;
+        // The white LIFE label alone is common in menus. Pair it with the narrower,
+        // saturated green health bar region to avoid treating menu controls as the HUD.
+        return whiteRatio(frame, 0.735, 0.008, 0.805, 0.055) > 0.055
+                && lifeGreenRatio(frame, 0.755, 0.045, 0.885, 0.095) > 0.16;
     }
 
     private double whiteRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -317,6 +331,10 @@ public final class AutoContinueController {
 
     private double greenRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
         return ratio(frame, x1, y1, x2, y2, PixelTest.GREEN);
+    }
+
+    private double lifeGreenRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
+        return ratio(frame, x1, y1, x2, y2, PixelTest.LIFE_GREEN);
     }
 
     private double darkRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -356,6 +374,7 @@ public final class AutoContinueController {
         PixelTest WHITE = (r, g, b) -> r > 210 && g > 210 && b > 210;
         PixelTest CYAN = (r, g, b) -> g > 130 && b > 130 && r < 200;
         PixelTest GREEN = (r, g, b) -> g > 150 && b > 120 && r < 190;
+        PixelTest LIFE_GREEN = (r, g, b) -> g > 165 && g > r + 35 && g > b + 10;
         PixelTest DARK = (r, g, b) -> r < 95 && g < 95 && b < 130;
 
         boolean matches(int r, int g, int b);
