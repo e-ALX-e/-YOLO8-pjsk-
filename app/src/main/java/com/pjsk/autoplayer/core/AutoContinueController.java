@@ -135,7 +135,12 @@ public final class AutoContinueController {
             int displayHeight,
             boolean clickBlocked,
             List<Detection> noteDetections) {
-        if (clickBlocked || frame == null || frame.isRecycled()) {
+        if (frame == null || frame.isRecycled()) {
+            return;
+        }
+        // Waiting for the gameplay HUD never injects input, so keep this state detector
+        // alive during no-click mode and the five-second click-resume delay.
+        if (clickBlocked && state != State.WAIT_LOADING) {
             return;
         }
 
