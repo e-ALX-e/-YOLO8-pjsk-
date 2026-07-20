@@ -56,7 +56,7 @@ public final class AutoPlayer {
         }
     }
 
-    public void onFrame(
+    public synchronized void onFrame(
             List<Detection> detections,
             int frameW,
             int frameH,
@@ -72,24 +72,24 @@ public final class AutoPlayer {
         processAutoAction(confirmed);
     }
 
-    public void setActionYBase(double actionYBase) {
+    public synchronized void setActionYBase(double actionYBase) {
         this.actionYBase = Config.ACTION_Y_MIN <= actionYBase && actionYBase <= Config.ACTION_Y_MAX
                 ? actionYBase
                 : Config.ACTION_Y_DEFAULT;
     }
 
-    public void setClickEnabled(boolean clickEnabled) {
+    public synchronized void setClickEnabled(boolean clickEnabled) {
         if (this.clickEnabled && !clickEnabled) {
             releaseAllActiveTouches();
         }
         this.clickEnabled = clickEnabled;
     }
 
-    public void setLogicPlayConfig(boolean enabled, int tapIntervalMs, double tapXRatio) {
+    public synchronized void setLogicPlayConfig(boolean enabled, int tapIntervalMs, double tapXRatio) {
         setLogicPlayConfig(enabled, tapIntervalMs, tapXRatio, null);
     }
 
-    public void setLogicPlayConfig(
+    public synchronized void setLogicPlayConfig(
             boolean enabled,
             int tapIntervalMs,
             double tapXRatio,
@@ -111,14 +111,14 @@ public final class AutoPlayer {
         }
     }
 
-    public boolean isLogicPlayActive() {
+    public synchronized boolean isLogicPlayActive() {
         return logicPlayEnabled && logicPlayActive;
     }
 
     /**
      * 只有带时间轴的逻辑才能自然结束。空时间轴的固定连点模式会持续运行，直到用户手动停止。
      */
-    public boolean isLogicPlayFinished() {
+    public synchronized boolean isLogicPlayFinished() {
         return logicPlayEnabled
                 && logicPlayActive
                 && !logicEvents.isEmpty()
@@ -126,7 +126,7 @@ public final class AutoPlayer {
                 && activeLogicGestures.isEmpty();
     }
 
-    public String logicPlayStatus() {
+    public synchronized String logicPlayStatus() {
         if (!logicPlayEnabled) {
             return "\u5173";
         }
@@ -142,7 +142,7 @@ public final class AutoPlayer {
         return "\u65f6\u95f4\u8f74 " + logicEventIndex + "/" + logicEvents.size();
     }
 
-    public void resetLogicPlayRuntime() {
+    public synchronized void resetLogicPlayRuntime() {
         logicPlayActive = false;
         nextLogicTapAtSec = Double.NaN;
         logicStartedAtSec = Double.NaN;
@@ -322,6 +322,9 @@ public final class AutoPlayer {
 
 
     private void startLogicPlay(double actionY) {
+        // The logic chart is a real-time timeline.  It must start from a
+        // monotonic clock rather than wait for the next captured video frame.
+        currentTimestampSec = System.nanoTime() / 1_000_000_000.0;
         logicPlayActive = true;
         nextLogicTapAtSec = currentTimestampSec;
         logicStartedAtSec = currentTimestampSec;
@@ -333,6 +336,15 @@ public final class AutoPlayer {
                 + " intervalMs=" + logicTapIntervalMs
                 + " xRatio=" + logicTapXRatio
                 + " timelineEvents=" + logicEvents.size());
+    }
+
+    /** Advances logic gestures from the dedicated real-time scheduler. */
+    public synchronized void advanceLogicTimeline(double timestampSec) {
+        if (!logicPlayActive || timestampSec <= currentTimestampSec) {
+            return;
+        }
+        currentTimestampSec = timestampSec;
+        processLogicPlay(s(actionYBase));
     }
 
     private void processLogicPlay(double actionY) {
@@ -376,8 +388,8 @@ public final class AutoPlayer {
         if (LogicEvent.TYPE_TAP.equals(event.type)) {
             Log.i(TAG, "logic tap x=" + startX + " y=" + touchY + " touchId=" + touchId);
             reportAction("logic_tap", startX, touchY);
-            injector.down(startX, touchY, touchId);
-            injector.up(touchId);
+            injector.downRealtime(startX, touchY, touchId);
+            injector.upRealtime(touchId);
             scheduleTouchIdRelease(touchId);
             return true;
         }
@@ -385,7 +397,7 @@ public final class AutoPlayer {
         Log.i(TAG, "logic " + event.type + " x=" + startX + "->" + endX
                 + " y=" + touchY + " durationMs=" + event.durationMs + " touchId=" + touchId);
         reportAction("logic_" + event.type, startX, touchY);
-        injector.down(startX, touchY, touchId);
+        injector.downRealtime(startX, touchY, touchId);
         activeLogicGestures.add(new LogicGesture(
                 touchId,
                 event.type,
@@ -410,18 +422,18 @@ public final class AutoPlayer {
                 int moveX = gesture.points.isEmpty()
                         ? (int) Math.round(gesture.startX + (gesture.endX - gesture.startX) * progress)
                         : logicPathXAtProgress(gesture, progress);
-                injector.move(moveX, gesture.y, gesture.touchId);
+                injector.moveRealtime(moveX, gesture.y, gesture.touchId);
             } else if (LogicEvent.TYPE_FLICK.equals(gesture.type)) {
                 int moveY = (int) Math.round(gesture.y + (gesture.endY - gesture.y) * progress);
-                injector.move(gesture.startX, moveY, gesture.touchId);
+                injector.moveRealtime(gesture.startX, moveY, gesture.touchId);
             }
             if (progress >= 1.0) {
                 if (LogicEvent.TYPE_SWIPE.equals(gesture.type)) {
-                    injector.move(gesture.endX, gesture.y, gesture.touchId);
+                    injector.moveRealtime(gesture.endX, gesture.y, gesture.touchId);
                 } else if (LogicEvent.TYPE_FLICK.equals(gesture.type)) {
-                    injector.move(gesture.startX, gesture.endY, gesture.touchId);
+                    injector.moveRealtime(gesture.startX, gesture.endY, gesture.touchId);
                 }
-                injector.up(gesture.touchId);
+                injector.upRealtime(gesture.touchId);
                 scheduleTouchIdRelease(gesture.touchId);
                 activeLogicGestures.remove(index);
             }
@@ -438,8 +450,8 @@ public final class AutoPlayer {
         int touchY = toDisplayY(actionY);
         Log.i(TAG, "logic tap x=" + touchX + " y=" + touchY + " touchId=" + touchId);
         reportAction(action, touchX, touchY);
-        injector.down(touchX, touchY, touchId);
-        injector.up(touchId);
+        injector.downRealtime(touchX, touchY, touchId);
+        injector.upRealtime(touchId);
         scheduleTouchIdRelease(touchId);
     }
 

@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -47,12 +49,23 @@ public final class RootEventInjector implements TouchInjector {
     private final int[] posY = new int[10];
     private final int[] trackingIds = new int[10];
     private final long[] downNanos = new long[10];
+    // Movement is produced by a higher-frequency timeline than the root writer
+    // can always flush. Keep only the latest target per pointer so lag cannot
+    // turn the latter half of a slide into a burst of stale MOVE events.
+    private final Object pendingMoveLock = new Object();
+    private final int[] pendingMoveX = new int[10];
+    private final int[] pendingMoveY = new int[10];
+    private final int[] pendingMoveVersion = new int[10];
+    private final boolean[] pendingMoveQueued = new boolean[10];
     private final Context context;
     private final int displayW;
     private final int displayH;
     private final int displayRotation;
     private final double pxScale;
     private final ExecutorService inputWorker = Executors.newSingleThreadExecutor();
+    // Delayed tap releases must never sleep on the logic timeline thread.
+    private final ScheduledExecutorService realtimeReleaseWorker =
+            Executors.newSingleThreadScheduledExecutor();
     private final ByteBuffer eventBuffer = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN);
 
     private Process shell;
@@ -88,13 +101,68 @@ public final class RootEventInjector implements TouchInjector {
     }
 
     @Override
+    public void downRealtime(int x, int y, int touchId) {
+        runRealtime("down", () -> doDown(x, y, touchId));
+    }
+
+    @Override
     public void move(int x, int y, int touchId) {
-        enqueue("move", () -> doMove(x, y, touchId));
+        if (!validTouchId(touchId)) {
+            return;
+        }
+        boolean enqueueMove = false;
+        synchronized (pendingMoveLock) {
+            if (closed) {
+                return;
+            }
+            pendingMoveX[touchId] = x;
+            pendingMoveY[touchId] = y;
+            pendingMoveVersion[touchId]++;
+            if (!pendingMoveQueued[touchId]) {
+                pendingMoveQueued[touchId] = true;
+                enqueueMove = true;
+            }
+        }
+        if (enqueueMove) {
+            enqueue("move", () -> doLatestMove(touchId));
+        }
+    }
+
+    @Override
+    public void moveRealtime(int x, int y, int touchId) {
+        runRealtime("move", () -> doMove(x, y, touchId));
     }
 
     @Override
     public void up(int touchId) {
-        enqueue("up", () -> doUp(touchId));
+        enqueue("up", () -> doLatestMoveAndUp(touchId));
+    }
+
+    @Override
+    public void upRealtime(int touchId) {
+        if (!validTouchId(touchId) || closed) {
+            return;
+        }
+        long remainingNanos;
+        synchronized (this) {
+            if (!active[touchId]) {
+                return;
+            }
+            remainingNanos = (long) (Config.MIN_TAP_SECONDS * 1_000_000_000L)
+                    - (System.nanoTime() - downNanos[touchId]);
+        }
+        if (remainingNanos <= 0L) {
+            runRealtime("up", () -> doUp(touchId));
+            return;
+        }
+        try {
+            realtimeReleaseWorker.schedule(
+                    () -> runRealtime("up", () -> doUp(touchId)),
+                    remainingNanos,
+                    TimeUnit.NANOSECONDS);
+        } catch (RejectedExecutionException ignored) {
+            // Service shutdown may race with a final scheduled release.
+        }
     }
 
     @Override
@@ -112,6 +180,7 @@ public final class RootEventInjector implements TouchInjector {
     public void shutdown() {
         closed = true;
         inputWorker.shutdownNow();
+        realtimeReleaseWorker.shutdownNow();
         closeShell();
     }
 
@@ -140,6 +209,19 @@ public final class RootEventInjector implements TouchInjector {
 
     private interface InputTask {
         void run() throws IOException;
+    }
+
+    private void runRealtime(String name, InputTask task) {
+        if (closed) {
+            return;
+        }
+        try {
+            task.run();
+        } catch (IOException | RuntimeException e) {
+            if (!closed) {
+                Log.e(TAG, name + " realtime failed", e);
+            }
+        }
     }
 
     private void doFlickBatch(List<TouchPoint> points) throws IOException {
@@ -173,7 +255,7 @@ public final class RootEventInjector implements TouchInjector {
         doUp(touchId);
     }
 
-    private void doDown(int x, int y, int touchId) throws IOException {
+    private synchronized void doDown(int x, int y, int touchId) throws IOException {
         if (!validTouchId(touchId)) {
             return;
         }
@@ -203,7 +285,7 @@ public final class RootEventInjector implements TouchInjector {
         sync();
     }
 
-    private void doMove(int x, int y, int touchId) throws IOException {
+    private synchronized void doMove(int x, int y, int touchId) throws IOException {
         if (!validTouchId(touchId) || !active[touchId]) {
             return;
         }
@@ -215,7 +297,59 @@ public final class RootEventInjector implements TouchInjector {
         sync();
     }
 
-    private void doUp(int touchId) throws IOException {
+    /** Sends the newest queued location, discarding intermediate stale moves. */
+    private void doLatestMove(int touchId) throws IOException {
+        if (!validTouchId(touchId)) {
+            return;
+        }
+        int x;
+        int y;
+        int version;
+        synchronized (pendingMoveLock) {
+            if (!pendingMoveQueued[touchId]) {
+                return;
+            }
+            x = pendingMoveX[touchId];
+            y = pendingMoveY[touchId];
+            version = pendingMoveVersion[touchId];
+        }
+        doMove(x, y, touchId);
+
+        boolean reschedule = false;
+        synchronized (pendingMoveLock) {
+            if (closed || pendingMoveVersion[touchId] == version) {
+                pendingMoveQueued[touchId] = false;
+            } else {
+                // A newer coordinate arrived while the root pipe was flushing.
+                // Queue one follow-up task rather than replaying every old point.
+                reschedule = true;
+            }
+        }
+        if (reschedule) {
+            enqueue("move", () -> doLatestMove(touchId));
+        }
+    }
+
+    /** The final move must be emitted immediately before lifting this pointer. */
+    private void doLatestMoveAndUp(int touchId) throws IOException {
+        if (validTouchId(touchId)) {
+            int x;
+            int y;
+            boolean hasPendingMove;
+            synchronized (pendingMoveLock) {
+                hasPendingMove = pendingMoveQueued[touchId];
+                x = pendingMoveX[touchId];
+                y = pendingMoveY[touchId];
+                pendingMoveQueued[touchId] = false;
+            }
+            if (hasPendingMove) {
+                doMove(x, y, touchId);
+            }
+        }
+        doUp(touchId);
+    }
+
+    private synchronized void doUp(int touchId) throws IOException {
         if (!validTouchId(touchId) || !active[touchId]) {
             return;
         }

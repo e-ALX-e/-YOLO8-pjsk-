@@ -23,6 +23,7 @@ import java.nio.ByteOrder;
 
 public final class ScreenCaptureSource implements AutoCloseable {
     private static final int CAPTURE_MAX_LONG_SIDE = 960;
+    private static final float CAPTURE_REQUESTED_FRAME_RATE = 120.0f;
 
     public interface Listener {
         default boolean shouldCaptureFrame() {
@@ -111,6 +112,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
         }, handler);
 
         Surface surface = imageReader.getSurface();
+        requestHighFrameRate(surface);
         virtualDisplay = mediaProjection.createVirtualDisplay(
                 "pjsk-capture",
                 width,
@@ -120,6 +122,23 @@ public final class ScreenCaptureSource implements AutoCloseable {
                 surface,
                 null,
                 null);
+    }
+
+    /**
+     * MediaProjection virtual displays otherwise default to 60 Hz on this device,
+     * even while the physical display is rendering the game at 120 Hz.
+     */
+    private void requestHighFrameRate(Surface surface) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return;
+        }
+        try {
+            surface.setFrameRate(
+                    CAPTURE_REQUESTED_FRAME_RATE,
+                    Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+        } catch (RuntimeException ignored) {
+            // Frame-rate requests are advisory; capture continues with the platform default.
+        }
     }
 
     private synchronized Frame toFrame(Image image) {

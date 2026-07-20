@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Comparator;
@@ -32,6 +33,7 @@ public final class AppSettings {
     private static final String KEY_NOTE_MODEL_MODE = "note_model_mode";
     private static final String KEY_CAPTURE_TARGET_PACKAGE = "capture_target_package";
     private static final String KEY_CAPTURE_TARGET_LABEL = "capture_target_label";
+    private static final int MAX_LOGIC_JSON_BYTES = 8 * 1024 * 1024;
 
     public static final int ACTION_Y_MIN = (int) Config.ACTION_Y_MIN;
     public static final int ACTION_Y_MAX = (int) Config.ACTION_Y_MAX;
@@ -46,6 +48,12 @@ public final class AppSettings {
     private static final String LEGACY_DEFAULT_LOGIC_PROFILE_ID = "default_2hz_center";
     private static final int DEFAULT_LOGIC_TAP_INTERVAL_MS = 500;
     private static final double DEFAULT_LOGIC_TAP_X_RATIO = 0.5;
+    private static boolean logicProfileSourcesLoaded;
+    private static List<LogicProfileSource> cachedLogicProfileSources = Collections.emptyList();
+    private static String cachedLoadedProfileSourceId = "";
+    private static long cachedLoadedProfileModified;
+    private static long cachedLoadedProfileLength;
+    private static LogicProfile cachedLoadedProfile;
 
     private AppSettings() {
     }
@@ -99,7 +107,7 @@ public final class AppSettings {
     }
 
     public static String logicProfileLabel(Context context) {
-        return selectedLogicProfile(context).name;
+        return selectedLogicProfileSource(context).name;
     }
 
     /** Fixed app-specific folder for logic JSON files. No storage permission is needed. */
@@ -116,58 +124,28 @@ public final class AppSettings {
         return directory;
     }
 
-    /**
-     * Imports every .json file from the fixed logic directory. Profiles with
-     * matching IDs replace their existing version, while all other profiles
-     * remain available in the selector.
-     */
+    /** Refreshes the selector index without reading or parsing chart events. */
     public static int importLogicProfilesFromDirectory(Context context) {
-        File directory = logicProfilesDirectory(context);
-        File[] files = directory.listFiles((dir, name) ->
-                name != null && name.toLowerCase().endsWith(".json"));
-        if (files == null || files.length == 0) {
-            return 0;
-        }
-        List<File> sortedFiles = new ArrayList<>();
-        Collections.addAll(sortedFiles, files);
-        Collections.sort(sortedFiles, (left, right) ->
-                left.getName().compareToIgnoreCase(right.getName()));
-
-        List<LogicProfile> merged = parseLogicProfiles(
-                prefs(context).getString(KEY_LOGIC_PROFILES_JSON, ""), false);
-        int loadedCount = 0;
-        for (File file : sortedFiles) {
-            String json = readLogicJsonFile(file);
-            if (json == null) {
-                continue;
-            }
-            for (LogicProfile profile : parseLogicProfiles(json, false)) {
-                replaceProfile(merged, profile);
-                loadedCount++;
-            }
-        }
-        if (loadedCount == 0) {
-            return 0;
-        }
-
-        JSONArray array = new JSONArray();
-        for (LogicProfile profile : merged) {
-            array.put(profile.toJson());
-        }
+        List<LogicProfileSource> sources = refreshLogicProfileSources(context);
         String selectedId = selectedLogicProfileId(context);
-        if (!containsProfile(merged, selectedId)) {
-            selectedId = merged.isEmpty() ? "" : merged.get(0).id;
+        LogicProfileSource selected = findLogicProfileSource(sources, selectedId);
+        if (selected == null) {
+            selectedId = sources.isEmpty() ? "" : sources.get(0).id;
+        } else if (!selected.id.equals(selectedId)) {
+            selectedId = selected.id;
         }
         prefs(context).edit()
-                .putString(KEY_LOGIC_PROFILES_JSON, array.toString())
+                // Old builds stored every parsed event here. Keep only the
+                // selected filename so thousands of charts cannot block launch.
+                .remove(KEY_LOGIC_PROFILES_JSON)
                 .putString(KEY_SELECTED_LOGIC_PROFILE_ID, selectedId)
                 .apply();
-        return loadedCount;
+        return sources.size();
     }
 
     public static List<LogicProfileChoice> logicProfileChoices(Context context) {
         List<LogicProfileChoice> choices = new ArrayList<>();
-        for (LogicProfile profile : logicProfiles(context)) {
+        for (LogicProfileSource profile : logicProfileSources(context)) {
             choices.add(new LogicProfileChoice(
                     profile.id,
                     profile.name,
@@ -177,7 +155,7 @@ public final class AppSettings {
     }
 
     public static LogicProfileChoice selectedLogicProfileChoice(Context context) {
-        LogicProfile selected = selectedLogicProfile(context);
+        LogicProfileSource selected = selectedLogicProfileSource(context);
         return new LogicProfileChoice(
                 selected.id,
                 selected.name,
@@ -185,7 +163,7 @@ public final class AppSettings {
     }
 
     public static boolean selectLogicProfile(Context context, String id) {
-        if (id == null || !containsProfile(logicProfiles(context), id)) {
+        if (id == null || findLogicProfileSource(logicProfileSources(context), id) == null) {
             return false;
         }
         prefs(context).edit().putString(KEY_SELECTED_LOGIC_PROFILE_ID, id).apply();
@@ -193,22 +171,22 @@ public final class AppSettings {
     }
 
     public static int getLogicTapIntervalMs(Context context) {
-        return selectedLogicProfile(context).tapIntervalMs;
+        return loadSelectedLogicProfile(context).tapIntervalMs;
     }
 
     public static double getLogicTapXRatio(Context context) {
-        return selectedLogicProfile(context).tapXRatio;
+        return loadSelectedLogicProfile(context).tapXRatio;
     }
 
     /** Returns the selected profile as an execution-ready plan. */
     public static LogicPlayPlan getLogicPlayPlan(Context context) {
-        LogicProfile profile = selectedLogicProfile(context);
+        LogicProfile profile = loadSelectedLogicProfile(context);
         return new LogicPlayPlan(!profile.id.isEmpty(),
                 profile.tapIntervalMs, profile.tapXRatio, profile.events);
     }
 
     public static String nextLogicProfile(Context context) {
-        List<LogicProfile> profiles = logicProfiles(context);
+        List<LogicProfileSource> profiles = logicProfileSources(context);
         if (profiles.isEmpty()) {
             return "未找到逻辑 JSON";
         }
@@ -220,17 +198,14 @@ public final class AppSettings {
                 break;
             }
         }
-        LogicProfile next = profiles.get((selectedIndex + 1) % profiles.size());
+        LogicProfileSource next = profiles.get((selectedIndex + 1) % profiles.size());
         prefs(context).edit().putString(KEY_SELECTED_LOGIC_PROFILE_ID, next.id).apply();
         return next.name;
     }
 
     public static String exportLogicProfilesJson(Context context) {
-        JSONArray array = new JSONArray();
-        for (LogicProfile profile : logicProfiles(context)) {
-            array.put(profile.toJson());
-        }
-        return array.toString();
+        LogicProfile profile = loadSelectedLogicProfile(context);
+        return profile.id.isEmpty() ? "[]" : profile.toJson().toString();
     }
 
     public static boolean importLogicProfilesJson(Context context, String json) {
@@ -238,18 +213,14 @@ public final class AppSettings {
         if (imported.isEmpty()) {
             return false;
         }
-        JSONArray array = new JSONArray();
+        File directory = logicProfilesDirectory(context);
         for (LogicProfile profile : imported) {
-            array.put(profile.toJson());
+            if (!writeLogicProfileFile(directory, profile)) {
+                return false;
+            }
         }
-        String selectedId = selectedLogicProfileId(context);
-        if (!containsProfile(imported, selectedId)) {
-            selectedId = imported.get(0).id;
-        }
-        prefs(context).edit()
-                .putString(KEY_LOGIC_PROFILES_JSON, array.toString())
-                .putString(KEY_SELECTED_LOGIC_PROFILE_ID, selectedId)
-                .apply();
+        importLogicProfilesFromDirectory(context);
+        selectLogicProfile(context, fileIdForProfile(imported.get(0)));
         return true;
     }
 
@@ -362,18 +333,44 @@ public final class AppSettings {
     }
 
 
-    private static LogicProfile selectedLogicProfile(Context context) {
-        List<LogicProfile> profiles = logicProfiles(context);
-        String selectedId = selectedLogicProfileId(context);
-        for (LogicProfile profile : profiles) {
-            if (profile.id.equals(selectedId)) {
-                return profile;
-            }
-        }
-        if (profiles.isEmpty()) {
+    /** Reads exactly one selected file and reuses it until that file changes. */
+    private static synchronized LogicProfile loadSelectedLogicProfile(Context context) {
+        LogicProfileSource source = selectedLogicProfileSource(context);
+        if (source.file == null) {
             return emptyLogicProfile();
         }
-        LogicProfile fallback = profiles.get(0);
+        if (source.id.equals(cachedLoadedProfileSourceId)
+                && source.file.lastModified() == cachedLoadedProfileModified
+                && source.file.length() == cachedLoadedProfileLength
+                && cachedLoadedProfile != null) {
+            return cachedLoadedProfile;
+        }
+        String json = readLogicJsonFile(source.file);
+        List<LogicProfile> profiles = json == null
+                ? Collections.emptyList()
+                : parseLogicProfiles(json, false);
+        LogicProfile loaded = profiles.isEmpty() ? emptyLogicProfile() : profiles.get(0);
+        cachedLoadedProfileSourceId = source.id;
+        cachedLoadedProfileModified = source.file.lastModified();
+        cachedLoadedProfileLength = source.file.length();
+        cachedLoadedProfile = loaded;
+        return loaded;
+    }
+
+    private static LogicProfileSource selectedLogicProfileSource(Context context) {
+        List<LogicProfileSource> profiles = logicProfileSources(context);
+        String selectedId = selectedLogicProfileId(context);
+        LogicProfileSource selected = findLogicProfileSource(profiles, selectedId);
+        if (selected != null) {
+            if (!selected.id.equals(selectedId)) {
+                prefs(context).edit().putString(KEY_SELECTED_LOGIC_PROFILE_ID, selected.id).apply();
+            }
+            return selected;
+        }
+        if (profiles.isEmpty()) {
+            return LogicProfileSource.empty();
+        }
+        LogicProfileSource fallback = profiles.get(0);
         prefs(context).edit().putString(KEY_SELECTED_LOGIC_PROFILE_ID, fallback.id).apply();
         return fallback;
     }
@@ -382,9 +379,83 @@ public final class AppSettings {
         return prefs(context).getString(KEY_SELECTED_LOGIC_PROFILE_ID, "");
     }
 
-    private static List<LogicProfile> logicProfiles(Context context) {
-        return parseLogicProfiles(
-                prefs(context).getString(KEY_LOGIC_PROFILES_JSON, ""), false);
+    private static synchronized List<LogicProfileSource> refreshLogicProfileSources(Context context) {
+        File[] files = logicProfilesDirectory(context).listFiles((dir, name) ->
+                name != null && name.toLowerCase().endsWith(".json"));
+        List<File> sortedFiles = new ArrayList<>();
+        if (files != null) {
+            Collections.addAll(sortedFiles, files);
+        }
+        Collections.sort(sortedFiles, (left, right) ->
+                left.getName().compareToIgnoreCase(right.getName()));
+
+        List<LogicProfileSource> sources = new ArrayList<>();
+        for (File file : sortedFiles) {
+            String id = fileIdForName(file.getName());
+            if (!id.isEmpty()) {
+                sources.add(new LogicProfileSource(id, displayNameForFileId(id), file));
+            }
+        }
+        cachedLogicProfileSources = Collections.unmodifiableList(sources);
+        logicProfileSourcesLoaded = true;
+        cachedLoadedProfile = null;
+        cachedLoadedProfileSourceId = "";
+        return cachedLogicProfileSources;
+    }
+
+    private static synchronized List<LogicProfileSource> logicProfileSources(Context context) {
+        return logicProfileSourcesLoaded
+                ? cachedLogicProfileSources
+                : refreshLogicProfileSources(context);
+    }
+
+    private static LogicProfileSource findLogicProfileSource(
+            List<LogicProfileSource> sources, String id) {
+        if (id == null || id.isEmpty()) {
+            return null;
+        }
+        for (LogicProfileSource source : sources) {
+            if (source.id.equals(id) || source.matchesLegacyId(id)) {
+                return source;
+            }
+        }
+        return null;
+    }
+
+    private static String fileIdForProfile(LogicProfile profile) {
+        return fileIdForName(safeFileName(profile.id) + ".logic.json");
+    }
+
+    private static String fileIdForName(String name) {
+        if (name == null) {
+            return "";
+        }
+        String id = name.trim();
+        if (id.toLowerCase().endsWith(".logic.json")) {
+            id = id.substring(0, id.length() - ".logic.json".length());
+        } else if (id.toLowerCase().endsWith(".json")) {
+            id = id.substring(0, id.length() - ".json".length());
+        }
+        return id.trim();
+    }
+
+    private static String displayNameForFileId(String id) {
+        return id.isEmpty() ? "未选择逻辑" : id.replace('_', ' ');
+    }
+
+    private static String safeFileName(String value) {
+        return value == null ? "logic" : value.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private static boolean writeLogicProfileFile(File directory, LogicProfile profile) {
+        File target = new File(directory, safeFileName(profile.id) + ".logic.json");
+        try (FileOutputStream output = new FileOutputStream(target, false)) {
+            output.write(profile.toJson().toString().getBytes("UTF-8"));
+            output.flush();
+            return true;
+        } catch (IOException ignored) {
+            return false;
+        }
     }
 
     private static List<LogicProfile> parseLogicProfiles(String json, boolean fallbackDefault) {
@@ -436,7 +507,8 @@ public final class AppSettings {
     }
 
     private static String readLogicJsonFile(File file) {
-        if (file == null || !file.isFile() || file.length() <= 0 || file.length() > 1_048_576) {
+        if (file == null || !file.isFile() || file.length() <= 0
+                || file.length() > MAX_LOGIC_JSON_BYTES) {
             return null;
         }
         try (FileInputStream input = new FileInputStream(file);
@@ -489,6 +561,28 @@ public final class AppSettings {
             this.id = id;
             this.name = name;
             this.label = label;
+        }
+    }
+
+    /** Metadata only. Event data stays in the JSON file until playback begins. */
+    private static final class LogicProfileSource {
+        final String id;
+        final String name;
+        final File file;
+
+        LogicProfileSource(String id, String name, File file) {
+            this.id = id;
+            this.name = name;
+            this.file = file;
+        }
+
+        static LogicProfileSource empty() {
+            return new LogicProfileSource("", "未选择逻辑", null);
+        }
+
+        boolean matchesLegacyId(String legacyId) {
+            return id.equals(legacyId)
+                    || (file != null && file.getName().equalsIgnoreCase(legacyId + ".logic.json"));
         }
     }
 

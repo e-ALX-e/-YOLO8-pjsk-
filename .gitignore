@@ -28,3 +28,4 @@ yolov*.pt
 
 #制谱器
 制谱器/
+tools/sus_json/

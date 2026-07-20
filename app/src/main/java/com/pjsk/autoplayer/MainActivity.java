@@ -42,6 +42,7 @@ import java.util.Locale;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_CAPTURE = 1001;
+    private static final int MAX_VISIBLE_LOGIC_PROFILES = 120;
     public static final String EXTRA_AUTO_REAUTHORIZE = "autoReauthorize";
 
     private TextView statusView;
@@ -654,12 +655,20 @@ public final class MainActivity extends Activity {
         boolean wasUpdating = updatingLogicProfileSelector;
         updatingLogicProfileSelector = true;
         String normalizedQuery = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        String selectedId = AppSettings.selectedLogicProfileChoice(this).id;
         visibleLogicProfiles.clear();
         for (AppSettings.LogicProfileChoice choice : AppSettings.logicProfileChoices(this)) {
             if (normalizedQuery.isEmpty()
                     || choice.name.toLowerCase(Locale.ROOT).contains(normalizedQuery)
                     || choice.id.toLowerCase(Locale.ROOT).contains(normalizedQuery)) {
-                visibleLogicProfiles.add(choice);
+                if (visibleLogicProfiles.size() < MAX_VISIBLE_LOGIC_PROFILES) {
+                    visibleLogicProfiles.add(choice);
+                } else if (choice.id.equals(selectedId)) {
+                    // Keep the current choice selectable even when an empty
+                    // search has thousands of matches.
+                    visibleLogicProfiles.remove(visibleLogicProfiles.size() - 1);
+                    visibleLogicProfiles.add(choice);
+                }
             }
         }
         logicProfileAdapter.clear();

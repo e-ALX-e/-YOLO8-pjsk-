@@ -31,6 +31,7 @@ public final class StatusOverlay {
     private final Runnable onNoClickClick;
     private final Runnable onAutoSoloClick;
     private final Runnable onLogicPlayClick;
+    private final Runnable onLogicProfileClick;
     private final Runnable onResetStateClick;
     private final Runnable onDebugDisplayClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -49,6 +50,7 @@ public final class StatusOverlay {
     private Button noClickButton;
     private Button autoSoloButton;
     private Button logicPlayButton;
+    private Button logicProfileButton;
     private Button resetStateButton;
     private Button debugDisplayButton;
     private boolean collapsed;
@@ -70,6 +72,7 @@ public final class StatusOverlay {
             Runnable onNoClickClick,
             Runnable onAutoSoloClick,
             Runnable onLogicPlayClick,
+            Runnable onLogicProfileClick,
             Runnable onResetStateClick,
             Runnable onDebugDisplayClick) {
         this.context = context.getApplicationContext();
@@ -78,6 +81,7 @@ public final class StatusOverlay {
         this.onNoClickClick = onNoClickClick;
         this.onAutoSoloClick = onAutoSoloClick;
         this.onLogicPlayClick = onLogicPlayClick;
+        this.onLogicProfileClick = onLogicProfileClick;
         this.onResetStateClick = onResetStateClick;
         this.onDebugDisplayClick = onDebugDisplayClick;
     }
@@ -334,6 +338,10 @@ public final class StatusOverlay {
         resetStateButton.setOnClickListener(v -> onResetStateClick.run());
         thirdRow.addView(resetStateButton, makeGridButtonParams(true));
 
+        logicProfileButton = makeSmallButton("\u6362\u8c31");
+        logicProfileButton.setOnClickListener(v -> onLogicProfileClick.run());
+        thirdRow.addView(logicProfileButton, makeGridButtonParams(true));
+
         Button stop = makeSmallButton("\u505c\u6b62");
         stop.setOnClickListener(v -> onStopClick.run());
         thirdRow.addView(stop, makeGridButtonParams(false));
@@ -502,6 +510,7 @@ public final class StatusOverlay {
         noClickButton = null;
         autoSoloButton = null;
         logicPlayButton = null;
+        logicProfileButton = null;
         resetStateButton = null;
         debugDisplayButton = null;
         params = null;
