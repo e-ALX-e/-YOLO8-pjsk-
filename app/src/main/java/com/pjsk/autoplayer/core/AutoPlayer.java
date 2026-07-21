@@ -150,6 +150,14 @@ public final class AutoPlayer {
         releaseAllActiveTouches();
     }
 
+    /** Ensures a previous song cannot supply a false first-note trigger. */
+    public synchronized void resetNoteRecognitionState() {
+        releaseAllActiveTouches();
+        noteStates.clear();
+        flickHints.clear();
+        tracker.reset();
+    }
+
     private void processAutoAction(List<NoteTrack> confirmedTracks) {
         double actionY = s(actionYBase);
         if (logicPlayEnabled && logicPlayActive) {

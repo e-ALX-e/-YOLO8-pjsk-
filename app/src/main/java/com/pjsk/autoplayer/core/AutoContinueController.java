@@ -15,6 +15,7 @@ public final class AutoContinueController {
     private static final String TAG = "PJSK-AutoContinue";
 
     public static final String STATUS_PLAYING = "演奏乐曲";
+    public static final String STATUS_LOGIC_PLAYING = "逻辑演奏";
     public static final String STATUS_GAME_ENDED = "游戏结束";
     public static final String STATUS_SELECT_SONG = "选择歌曲";
     public static final String STATUS_WAIT_LOADING = "等待加载";
@@ -30,7 +31,6 @@ public final class AutoContinueController {
     private static final long PLAY_BUTTON_GONE_CONFIRM_MS = 2000;
     private static final long GAME_END_AFTER_START_GUARD_MS = 10000;
     // 判定轨道会早于第一颗音符出现。留出加载动画保护时间，避免加载页误检提前启动逻辑谱面。
-    private static final long LOGIC_FIRST_NOTE_ARM_DELAY_MS = 2000;
     // The judgement track is sampled on every captured frame while loading.
     private static final int TRACK_CONFIRMATION_COUNT = 3;
 
@@ -50,11 +50,7 @@ public final class AutoContinueController {
     private long liveClearBlockedUntilMs;
     private long lastNoteSeenMs;
     private long lastPlayButtonSeenMs;
-    private long logicFirstNoteAllowedAtMs;
     private int trackConfirmationCount;
-    // The note detector stays loaded throughout the transition, but only one
-    // warm-up inference is needed after the gameplay HUD is confirmed.
-    private boolean noteModelWarmUpPending;
     // 刚从等待加载确认进入演奏。CaptureService 会消费该标志，确保首帧不直接启动逻辑时间轴。
     private boolean enteredPlayingFromLoading;
     private List<Detection> lastButtonDetections = Collections.emptyList();
@@ -73,9 +69,7 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
-        logicFirstNoteAllowedAtMs = 0L;
         trackConfirmationCount = 0;
-        noteModelWarmUpPending = false;
         enteredPlayingFromLoading = false;
         lastButtonDetections = Collections.emptyList();
     }
@@ -89,9 +83,7 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
-        logicFirstNoteAllowedAtMs = 0L;
         trackConfirmationCount = 0;
-        noteModelWarmUpPending = false;
         enteredPlayingFromLoading = false;
         lastButtonDetections = Collections.emptyList();
         Log.i(TAG, "forced game ended state");
@@ -109,9 +101,7 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
-        logicFirstNoteAllowedAtMs = 0L;
         trackConfirmationCount = 0;
-        noteModelWarmUpPending = false;
         enteredPlayingFromLoading = false;
         lastButtonDetections = Collections.emptyList();
         Log.i(TAG, "forced waiting for judgement track state");
@@ -126,35 +116,18 @@ public final class AutoContinueController {
      * 逻辑模式会先进入此状态，再由 CaptureService 用第一颗触线音符确认真正开局。
      */
     public void waitForFirstLogicNote() {
-        logicFirstNoteAllowedAtMs = SystemClock.elapsedRealtime() + LOGIC_FIRST_NOTE_ARM_DELAY_MS;
         lastDetectMs = 0L;
         lastButtonDetections = Collections.emptyList();
-        noteModelWarmUpPending = true;
         Log.i(TAG, "playing state entered; logic timeline waits for first note");
     }
 
-    /** Loading animation is still visible, so detector results must not start the timeline yet. */
-    public boolean shouldDelayLogicFirstNote() {
-        return logicFirstNoteAllowedAtMs > SystemClock.elapsedRealtime();
-    }
-
-    /** Called only after AutoPlayer has started the logic timeline from a real trigger note. */
-    public void markLogicTimelineStarted() {
-        logicFirstNoteAllowedAtMs = 0L;
-        Log.i(TAG, "first logic note detected; timeline started");
-    }
-
-    /**
-     * Returns the one permitted warm-up inference after entering gameplay.
-     * Repeating this every capture frame wastes GPU time without improving
-     * first-note detection, because the NCNN model remains loaded.
-     */
-    public boolean consumeNoteModelWarmUp() {
-        if (!noteModelWarmUpPending) {
-            return false;
+    /** Called only after a real note reaches the judgement line and starts the timeline. */
+    public void enterLogicPlaying() {
+        if (state == State.PLAYING) {
+            state = State.LOGIC_PLAYING;
+            lastButtonDetections = Collections.emptyList();
+            Log.i(TAG, "first logic note detected; switching to logic performance");
         }
-        noteModelWarmUpPending = false;
-        return true;
     }
 
     /**
@@ -170,6 +143,9 @@ public final class AutoContinueController {
     public String statusText() {
         if (state == State.PLAYING) {
             return STATUS_PLAYING;
+        }
+        if (state == State.LOGIC_PLAYING) {
+            return STATUS_LOGIC_PLAYING;
         }
         if (state == State.GAME_ENDED) {
             return STATUS_GAME_ENDED;
@@ -241,8 +217,6 @@ public final class AutoContinueController {
                     waitUntilMs = 0L;
                     playWaitStartMs = 0L;
                     lastPlayButtonSeenMs = 0L;
-                    logicFirstNoteAllowedAtMs = 0L;
-                    noteModelWarmUpPending = false;
                     trackConfirmationCount = 0;
                     enteredPlayingFromLoading = true;
                     liveClearBlockedUntilMs = now + GAME_END_AFTER_START_GUARD_MS;
@@ -476,6 +450,7 @@ public final class AutoContinueController {
         static final int SELECT_SONG = 2;
         static final int WAIT_PLAY = 3;
         static final int WAIT_LOADING = 4;
+        static final int LOGIC_PLAYING = 5;
 
         private State() {
         }

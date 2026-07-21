@@ -266,6 +266,18 @@ public final class LaneTracker {
         return confirmed;
     }
 
+    /** Drops tracks from the previous song before arming a new logic timeline. */
+    public void reset() {
+        tracks.clear();
+        pending.clear();
+        nextId = 0;
+        initialized = false;
+        globalVyInitialized = false;
+        globalVy = 0.0;
+        lastTimestamp = null;
+        frameDt = 1.0 / 60.0;
+    }
+
     public int getKeyAt(double x, double y) {
         LaneInfo info = getLaneInfoAt(x, y);
         if (info.subLane < 0 || info.distance > info.localGap * 1.2) {

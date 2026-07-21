@@ -345,17 +345,7 @@ public final class CaptureService extends Service {
                     // 不运行音符识别或逻辑时间轴，下一帧才能由真实首音符触发。
                     currentAutoPlayer.setClickEnabled(false);
                     currentAutoPlayer.resetLogicPlayRuntime();
-                    handleAutoContinueFrame(frame, inferenceStartMs, currentAutoContinueController);
-                    return;
-                }
-                if (logicPlayEnabled && currentAutoContinueController.shouldDelayLogicFirstNote()) {
-                    currentAutoPlayer.setClickEnabled(false);
-                    currentAutoPlayer.resetLogicPlayRuntime();
-                    if (currentAutoContinueController.consumeNoteModelWarmUp()) {
-                        // One inference wakes the GPU path after the loading page. Further
-                        // frames remain idle until the first playable note is allowed.
-                        currentDetector.detect(frame.bitmap);
-                    }
+                    currentAutoPlayer.resetNoteRecognitionState();
                     handleAutoContinueFrame(frame, inferenceStartMs, currentAutoContinueController);
                     return;
                 }
@@ -408,7 +398,7 @@ public final class CaptureService extends Service {
             if (logicPlayEnabled
                     && currentAutoContinueController != null
                     && currentAutoPlayer.isLogicPlayActive()) {
-                currentAutoContinueController.markLogicTimelineStarted();
+                currentAutoContinueController.enterLogicPlaying();
                 autoContinueStatus = currentAutoContinueController.statusText();
             }
             long actionMs = Math.max(0L, SystemClock.elapsedRealtime() - actionStartMs);
