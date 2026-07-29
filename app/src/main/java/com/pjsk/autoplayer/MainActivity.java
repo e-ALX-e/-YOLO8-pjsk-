@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -60,16 +61,124 @@ public final class MainActivity extends Activity {
     private static final int COLOR_DANGER = Color.rgb(222, 93, 106);
 
     /** Keeps the text state and the switch visually separate but synchronized. */
-    private static final class RuntimeToggleControl {
+    private static final class RuntimeToggleIndicator {
         final TextView stateView;
         final View track;
         final View thumb;
 
-        RuntimeToggleControl(TextView stateView, View track, View thumb) {
+        RuntimeToggleIndicator(TextView stateView, View track, View thumb) {
             this.stateView = stateView;
             this.track = track;
             this.thumb = thumb;
         }
+    }
+
+    /** Unified settings row used by the Run and Logic pages. */
+    private final class RuntimeToggleControl extends LinearLayout {
+        private final TextView labelView;
+        private final TextView stateView;
+        private final View track;
+        private final View thumb;
+        private boolean checked;
+        private OnCheckedChangeListener listener;
+
+        RuntimeToggleControl() {
+            super(MainActivity.this);
+            setOrientation(HORIZONTAL);
+            setGravity(Gravity.CENTER_VERTICAL);
+            setPadding(dp(16), 0, dp(12), 0);
+            setMinimumHeight(dp(58));
+            setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 10));
+            setClickable(true);
+
+            labelView = new TextView(MainActivity.this);
+            labelView.setTextColor(COLOR_TEXT);
+            labelView.setTextSize(15f);
+            labelView.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            labelView.setSingleLine(true);
+            addView(labelView, new LinearLayout.LayoutParams(
+                    0, LayoutParams.MATCH_PARENT, 1f));
+
+            LinearLayout stateArea = new LinearLayout(MainActivity.this);
+            stateArea.setOrientation(HORIZONTAL);
+            stateArea.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+
+            stateView = new TextView(MainActivity.this);
+            stateView.setTextSize(13f);
+            stateView.setTypeface(Typeface.DEFAULT_BOLD);
+            stateView.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+            stateView.setSingleLine(true);
+            stateArea.addView(stateView, new LinearLayout.LayoutParams(dp(66),
+                    LayoutParams.MATCH_PARENT));
+
+            FrameLayout toggleArea = new FrameLayout(MainActivity.this);
+            track = new View(MainActivity.this);
+            FrameLayout.LayoutParams trackParams = new FrameLayout.LayoutParams(dp(46), dp(26));
+            trackParams.gravity = Gravity.CENTER;
+            toggleArea.addView(track, trackParams);
+
+            thumb = new View(MainActivity.this);
+            FrameLayout.LayoutParams thumbParams = new FrameLayout.LayoutParams(dp(20), dp(20));
+            thumbParams.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+            thumbParams.leftMargin = dp(8);
+            thumb.setBackground(makeOvalBackground(Color.WHITE, COLOR_BORDER));
+            toggleArea.addView(thumb, thumbParams);
+            stateArea.addView(toggleArea, new LinearLayout.LayoutParams(dp(56),
+                    LayoutParams.MATCH_PARENT));
+            addView(stateArea, new LinearLayout.LayoutParams(dp(140), LayoutParams.MATCH_PARENT));
+
+            setOnClickListener(view -> setChecked(!checked));
+            renderState();
+        }
+
+        void setText(String text) {
+            labelView.setText(text);
+            setContentDescription(text);
+        }
+
+        void setTextSize(float size) {
+            labelView.setTextSize(size);
+        }
+
+        void setTextColor(int color) {
+            labelView.setTextColor(color);
+        }
+
+        boolean isChecked() {
+            return checked;
+        }
+
+        void setChecked(boolean value) {
+            boolean changed = checked != value;
+            checked = value;
+            renderState();
+            if (changed && listener != null) {
+                listener.onCheckedChanged(this, checked);
+            }
+        }
+
+        void setOnCheckedChangeListener(OnCheckedChangeListener value) {
+            listener = value;
+        }
+
+        private void renderState() {
+            int color = checked ? COLOR_PRIMARY : COLOR_MUTED;
+            stateView.setText(checked ? "\u5df2\u5f00\u542f" : "\u5df2\u5173\u95ed");
+            stateView.setTextColor(color);
+            track.setBackground(makeRoundedBackground(
+                    checked ? COLOR_PRIMARY : Color.rgb(190, 198, 208),
+                    checked ? COLOR_PRIMARY : Color.rgb(190, 198, 208),
+                    16));
+            FrameLayout.LayoutParams thumbParams = (FrameLayout.LayoutParams) thumb.getLayoutParams();
+            thumbParams.gravity = (checked ? Gravity.END : Gravity.START) | Gravity.CENTER_VERTICAL;
+            thumbParams.leftMargin = checked ? 0 : dp(8);
+            thumbParams.rightMargin = checked ? dp(8) : 0;
+            thumb.setLayoutParams(thumbParams);
+        }
+    }
+
+    private interface OnCheckedChangeListener {
+        void onCheckedChanged(RuntimeToggleControl control, boolean checked);
     }
 
     private TextView statusView;
@@ -78,16 +187,16 @@ public final class MainActivity extends Activity {
     private TextView touchMappingView;
     private TextView noteModelView;
     private TextView customOverlayActionView;
-    private RuntimeToggleControl overlayVisibilitySwitch;
-    private RuntimeToggleControl overlayCollapseSwitch;
-    private RuntimeToggleControl overlayParametersSwitch;
-    private RuntimeToggleControl overlayDebugSwitch;
-    private RuntimeToggleControl overlayRecordingSwitch;
+    private RuntimeToggleIndicator overlayVisibilitySwitch;
+    private RuntimeToggleIndicator overlayCollapseSwitch;
+    private RuntimeToggleIndicator overlayParametersSwitch;
+    private RuntimeToggleIndicator overlayDebugSwitch;
+    private RuntimeToggleIndicator overlayRecordingSwitch;
     private SeekBar calibrationSeekBar;
-    private Switch previewSwitch;
-    private Switch noClickSwitch;
-    private Switch autoSoloSwitch;
-    private Switch logicPlaySwitch;
+    private RuntimeToggleControl previewSwitch;
+    private RuntimeToggleControl noClickSwitch;
+    private RuntimeToggleControl autoSoloSwitch;
+    private RuntimeToggleControl logicPlaySwitch;
     private TextView captureTargetView;
     private Spinner captureTargetSelector;
     private ArrayAdapter<String> captureTargetAdapter;
@@ -204,7 +313,7 @@ public final class MainActivity extends Activity {
 
         addCaptureTargetControls(runPage);
 
-        previewSwitch = new Switch(this);
+        previewSwitch = new RuntimeToggleControl();
         previewSwitch.setText("显示识别预览窗口");
         previewSwitch.setTextSize(15f);
         previewSwitch.setTextColor(Color.rgb(45, 52, 64));
@@ -225,7 +334,7 @@ public final class MainActivity extends Activity {
         switchParams.setMargins(0, dp(8), 0, 0);
         runPage.addView(previewSwitch, switchParams);
 
-        noClickSwitch = new Switch(this);
+        noClickSwitch = new RuntimeToggleControl();
         noClickSwitch.setText("不点击模式（只识别，关闭后 5 秒恢复点击）");
         noClickSwitch.setTextSize(15f);
         noClickSwitch.setTextColor(Color.rgb(45, 52, 64));
@@ -240,7 +349,7 @@ public final class MainActivity extends Activity {
         noClickParams.setMargins(0, dp(6), 0, 0);
         runPage.addView(noClickSwitch, noClickParams);
 
-        autoSoloSwitch = new Switch(this);
+        autoSoloSwitch = new RuntimeToggleControl();
         autoSoloSwitch.setText("自动单人模式");
         autoSoloSwitch.setTextSize(15f);
         autoSoloSwitch.setTextColor(Color.rgb(45, 52, 64));
@@ -255,7 +364,7 @@ public final class MainActivity extends Activity {
         autoSoloParams.setMargins(0, dp(6), 0, 0);
         logicPage.addView(autoSoloSwitch, autoSoloParams);
 
-        logicPlaySwitch = new Switch(this);
+        logicPlaySwitch = new RuntimeToggleControl();
         logicPlaySwitch.setText("\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
         logicPlaySwitch.setTextSize(15f);
         logicPlaySwitch.setTextColor(Color.rgb(45, 52, 64));
@@ -1259,7 +1368,7 @@ public final class MainActivity extends Activity {
         updateOverlayRuntimeStateUi();
     }
 
-    private RuntimeToggleControl addOverlayRuntimeSwitchRow(
+    private RuntimeToggleIndicator addOverlayRuntimeSwitchRow(
             LinearLayout root,
             String label,
             String action) {
@@ -1319,7 +1428,7 @@ public final class MainActivity extends Activity {
         rowParams.height = dp(58);
         rowParams.setMargins(0, dp(8), 0, 0);
         root.addView(row, rowParams);
-        return new RuntimeToggleControl(stateView, track, thumb);
+        return new RuntimeToggleIndicator(stateView, track, thumb);
     }
 
     private void addOverlayRuntimeActionRow(
@@ -1389,7 +1498,7 @@ public final class MainActivity extends Activity {
     }
 
     private void setOverlayRuntimeSwitch(
-            RuntimeToggleControl control,
+            RuntimeToggleIndicator control,
             boolean checked,
             String state,
             int accent) {
@@ -1543,8 +1652,18 @@ public final class MainActivity extends Activity {
             input.setPadding(dp(12), dp(4), dp(12), dp(4));
             input.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 8));
         } else if (view instanceof Spinner) {
-            view.setPadding(dp(10), 0, dp(10), 0);
-            view.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 8));
+            view.setMinimumHeight(dp(52));
+            view.setPadding(dp(14), dp(4), dp(12), dp(4));
+            view.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 10));
+        } else if (view instanceof SeekBar) {
+            SeekBar seekBar = (SeekBar) view;
+            seekBar.setMinimumHeight(dp(42));
+            seekBar.setPadding(dp(6), dp(4), dp(6), dp(4));
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                seekBar.setProgressTintList(ColorStateList.valueOf(COLOR_PRIMARY));
+                seekBar.setThumbTintList(ColorStateList.valueOf(COLOR_PRIMARY));
+                seekBar.setProgressBackgroundTintList(ColorStateList.valueOf(COLOR_BORDER));
+            }
         }
 
         if (view instanceof ViewGroup) {
