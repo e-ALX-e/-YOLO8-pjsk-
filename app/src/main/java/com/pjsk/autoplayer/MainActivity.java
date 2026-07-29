@@ -25,6 +25,7 @@ import android.widget.ArrayAdapter;
 import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -61,11 +62,13 @@ public final class MainActivity extends Activity {
     /** Keeps the text state and the switch visually separate but synchronized. */
     private static final class RuntimeToggleControl {
         final TextView stateView;
-        final Switch toggle;
+        final View track;
+        final View thumb;
 
-        RuntimeToggleControl(TextView stateView, Switch toggle) {
+        RuntimeToggleControl(TextView stateView, View track, View thumb) {
             this.stateView = stateView;
-            this.toggle = toggle;
+            this.track = track;
+            this.thumb = thumb;
         }
     }
 
@@ -1289,16 +1292,25 @@ public final class MainActivity extends Activity {
         stateArea.addView(stateView, new LinearLayout.LayoutParams(dp(66),
                 LinearLayout.LayoutParams.MATCH_PARENT));
 
-        Switch toggle = new Switch(this);
-        toggle.setTag("inline-toggle");
-        toggle.setShowText(false);
-        toggle.setGravity(Gravity.CENTER);
-        toggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (!updatingOverlayRuntimeSwitches) {
-                toggleOverlayRuntimeAction(action);
-            }
-        });
-        stateArea.addView(toggle, new LinearLayout.LayoutParams(dp(62),
+        FrameLayout toggle = new FrameLayout(this);
+        toggle.setContentDescription(label);
+        toggle.setForegroundGravity(Gravity.CENTER);
+
+        View track = new View(this);
+        FrameLayout.LayoutParams trackParams = new FrameLayout.LayoutParams(dp(46), dp(26));
+        trackParams.gravity = Gravity.CENTER;
+        toggle.addView(track, trackParams);
+
+        View thumb = new View(this);
+        FrameLayout.LayoutParams thumbParams = new FrameLayout.LayoutParams(dp(20), dp(20));
+        thumbParams.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+        thumbParams.leftMargin = dp(3);
+        thumb.setLayoutParams(thumbParams);
+        thumb.setBackground(makeOvalBackground(Color.WHITE, COLOR_BORDER));
+        toggle.addView(thumb);
+
+        toggle.setOnClickListener(v -> toggleOverlayRuntimeAction(action));
+        stateArea.addView(toggle, new LinearLayout.LayoutParams(dp(56),
                 LinearLayout.LayoutParams.MATCH_PARENT));
         LinearLayout.LayoutParams stateParams = new LinearLayout.LayoutParams(
                 dp(140), LinearLayout.LayoutParams.MATCH_PARENT);
@@ -1307,7 +1319,7 @@ public final class MainActivity extends Activity {
         rowParams.height = dp(58);
         rowParams.setMargins(0, dp(8), 0, 0);
         root.addView(row, rowParams);
-        return new RuntimeToggleControl(stateView, toggle);
+        return new RuntimeToggleControl(stateView, track, thumb);
     }
 
     private void addOverlayRuntimeActionRow(
@@ -1384,9 +1396,17 @@ public final class MainActivity extends Activity {
         if (control == null) {
             return;
         }
-        control.toggle.setChecked(checked);
         control.stateView.setText(state);
         control.stateView.setTextColor(accent);
+        control.track.setBackground(makeRoundedBackground(
+                checked ? COLOR_PRIMARY : Color.rgb(190, 198, 208),
+                checked ? COLOR_PRIMARY : Color.rgb(190, 198, 208),
+                16));
+        FrameLayout.LayoutParams thumbParams = (FrameLayout.LayoutParams) control.thumb.getLayoutParams();
+        thumbParams.gravity = (checked ? Gravity.END : Gravity.START) | Gravity.CENTER_VERTICAL;
+        thumbParams.leftMargin = checked ? 0 : dp(3);
+        thumbParams.rightMargin = checked ? dp(3) : 0;
+        control.thumb.setLayoutParams(thumbParams);
     }
 
     /** Stores meaningful overlay choices even before the capture service exists. */
@@ -1625,6 +1645,14 @@ public final class MainActivity extends Activity {
         GradientDrawable background = new GradientDrawable();
         background.setColor(fillColor);
         background.setCornerRadius(dp(radiusDp));
+        background.setStroke(dp(1), borderColor);
+        return background;
+    }
+
+    private GradientDrawable makeOvalBackground(int fillColor, int borderColor) {
+        GradientDrawable background = new GradientDrawable();
+        background.setShape(GradientDrawable.OVAL);
+        background.setColor(fillColor);
         background.setStroke(dp(1), borderColor);
         return background;
     }
