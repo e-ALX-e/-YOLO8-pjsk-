@@ -15,7 +15,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.ArrayAdapter;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -65,20 +64,20 @@ public final class StatusOverlay {
     private TextView statusTitleView;
     private TextView autoContinueStatusView;
     private TextView statusView;
-    private Button collapseButton;
-    private Button hideButton;
-    private Button detailsButton;
-    private Button previewButton;
-    private Button noClickButton;
-    private Button autoSoloButton;
-    private Button logicPlayButton;
-    private Button logicProfileButton;
-    private Button resetStateButton;
-    private Button screenRecordButton;
-    private Button customButton;
-    private Button debugDisplayButton;
+    private TextView collapseButton;
+    private TextView hideButton;
+    private TextView detailsButton;
+    private TextView previewButton;
+    private TextView noClickButton;
+    private TextView autoSoloButton;
+    private TextView logicPlayButton;
+    private TextView logicProfileButton;
+    private TextView resetStateButton;
+    private TextView screenRecordButton;
+    private TextView customButton;
+    private TextView debugDisplayButton;
     private TextView calibrationStatusView;
-    private Button calibrationLockButton;
+    private TextView calibrationLockButton;
     private Spinner logicSongSelector;
     private Spinner logicDifficultySelector;
     private ArrayAdapter<String> logicSongAdapter;
@@ -471,7 +470,7 @@ public final class StatusOverlay {
         logicProfileButton.setOnClickListener(v -> onLogicProfileClick.run());
         thirdRow.addView(logicProfileButton, makeGridButtonParams(true));
 
-        Button stop = makeSmallButton("\u505c\u6b62");
+        TextView stop = makeSmallButton("\u505c\u6b62");
         stop.setOnClickListener(v -> onStopClick.run());
         thirdRow.addView(stop, makeGridButtonParams(false));
 
@@ -585,11 +584,11 @@ public final class StatusOverlay {
         buttonList.addView(calibrationInfoRow, calibrationInfoParams);
 
         LinearLayout calibrationActionRow = makeButtonRow();
-        Button calibrationUp = makeSmallButton("\u4e0a\u79fb");
+        TextView calibrationUp = makeSmallButton("\u4e0a\u79fb");
         calibrationUp.setOnClickListener(v -> adjustActionY(-1.0));
         calibrationActionRow.addView(calibrationUp, makeGridButtonParams(true));
 
-        Button calibrationReset = makeSmallButton("\u91cd\u7f6e");
+        TextView calibrationReset = makeSmallButton("\u91cd\u7f6e");
         calibrationReset.setOnClickListener(v -> {
             if (AppSettings.isActionYCalibrationLocked(context)) {
                 return;
@@ -599,7 +598,7 @@ public final class StatusOverlay {
         });
         calibrationActionRow.addView(calibrationReset, makeGridButtonParams(true));
 
-        Button calibrationDown = makeSmallButton("\u4e0b\u79fb");
+        TextView calibrationDown = makeSmallButton("\u4e0b\u79fb");
         calibrationDown.setOnClickListener(v -> adjustActionY(1.0));
         calibrationActionRow.addView(calibrationDown, makeGridButtonParams(false));
         buttonList.addView(calibrationActionRow, new LinearLayout.LayoutParams(
@@ -738,16 +737,23 @@ public final class StatusOverlay {
                 Color.rgb(123, 163, 207)));
     }
 
-    private Button makeSmallButton(String text) {
-        Button button = new Button(context);
+    /**
+     * Overlay buttons deliberately use a TextView instead of the platform Button widget.
+     * Some landscape overlay windows draw Button's built-in inset/foreground incorrectly;
+     * this keeps every button's background and touch area inside the same explicit bounds.
+     */
+    private TextView makeSmallButton(String text) {
+        TextView button = new TextView(context);
         button.setText(text);
-        button.setAllCaps(false);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
         button.setTextSize(10.5f);
         button.setTextColor(COLOR_BUTTON_TEXT);
+        button.setGravity(Gravity.CENTER);
         button.setSingleLine(false);
         button.setPadding(dp(3), 0, dp(3), 0);
+        button.setClickable(true);
+        button.setFocusable(true);
         button.setBackground(makeButtonBackground(COLOR_BUTTON, COLOR_BUTTON_BORDER));
         return button;
     }
