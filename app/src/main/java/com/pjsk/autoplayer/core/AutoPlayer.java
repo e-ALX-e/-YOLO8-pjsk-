@@ -25,6 +25,7 @@ public final class AutoPlayer {
     private final Map<Integer, NoteState> noteStates = new HashMap<>();
     private final Map<Integer, FlickHint> flickHints = new HashMap<>();
     private final List<Integer> availableTouchIds = new ArrayList<>();
+    private final List<DelayedTouchRelease> delayedTouchReleases = new ArrayList<>();
     private double pxScale = 1.0;
     private double displayScaleX = 1.0;
     private double displayScaleY = 1.0;
@@ -77,6 +78,7 @@ public final class AutoPlayer {
         List<PendingRelease> pendingTapReleases = new ArrayList<>();
         List<TouchPoint> pendingFlicks = new ArrayList<>();
 
+        releaseDueTouchIds();
         updateFlickHints(confirmedTracks, actionY);
         rebindHoldingStates(confirmedTracks);
         Set<Integer> activeIds = new HashSet<>();
@@ -189,7 +191,7 @@ public final class AutoPlayer {
                                 + " touchId=" + ns.touchId);
                         reportAction("hold_flick", touchX, touchY);
                         injector.flickHeld(touchX, touchY, ns.touchId);
-                        releaseTouchId(ns.touchId);
+                        scheduleTouchIdRelease(ns.touchId);
                         ns.touchId = -1;
                     }
                     ns.state = NoteState.STATE_FINISHED;
@@ -226,7 +228,7 @@ public final class AutoPlayer {
         if (!pendingFlicks.isEmpty()) {
             injector.flickBatch(pendingFlicks);
             for (TouchPoint point : pendingFlicks) {
-                releaseTouchId(point.touchId);
+                scheduleTouchIdRelease(point.touchId);
             }
         }
     }
@@ -391,6 +393,7 @@ public final class AutoPlayer {
     }
 
     private int acquireTouchId() {
+        releaseDueTouchIds();
         if (availableTouchIds.isEmpty()) {
             return -1;
         }
@@ -412,19 +415,47 @@ public final class AutoPlayer {
         if (ns.touchId >= 0) {
             Log.i(TAG, "release touchId=" + ns.touchId);
             injector.up(ns.touchId);
-            releaseTouchId(ns.touchId);
+            scheduleTouchIdRelease(ns.touchId);
             ns.touchId = -1;
         }
         ns.state = NoteState.STATE_FINISHED;
     }
 
+    private void scheduleTouchIdRelease(int touchId) {
+        if (touchId < 0 || availableTouchIds.contains(touchId)) {
+            return;
+        }
+        double releaseAt = currentTimestampSec + Config.TOUCH_ID_RELEASE_DELAY_SECONDS;
+        for (DelayedTouchRelease release : delayedTouchReleases) {
+            if (release.touchId == touchId) {
+                release.releaseAtSec = Math.max(release.releaseAtSec, releaseAt);
+                return;
+            }
+        }
+        delayedTouchReleases.add(new DelayedTouchRelease(touchId, releaseAt));
+    }
+
+    private void releaseDueTouchIds() {
+        List<DelayedTouchRelease> remaining = new ArrayList<>();
+        for (DelayedTouchRelease release : delayedTouchReleases) {
+            if (release.releaseAtSec <= currentTimestampSec) {
+                releaseTouchId(release.touchId);
+            } else {
+                remaining.add(release);
+            }
+        }
+        delayedTouchReleases.clear();
+        delayedTouchReleases.addAll(remaining);
+    }
+
     private void releaseAllActiveTouches() {
         flickHints.clear();
+        delayedTouchReleases.clear();
         for (NoteState ns : noteStates.values()) {
             if (ns.touchId >= 0) {
                 Log.i(TAG, "no click mode release touchId=" + ns.touchId);
                 injector.up(ns.touchId);
-                releaseTouchId(ns.touchId);
+                scheduleTouchIdRelease(ns.touchId);
                 ns.touchId = -1;
             }
             ns.state = NoteState.STATE_FINISHED;
@@ -489,6 +520,16 @@ public final class AutoPlayer {
             this.key = key;
             this.xAtLine = xAtLine;
             this.timestampSec = timestampSec;
+        }
+    }
+
+    private static final class DelayedTouchRelease {
+        final int touchId;
+        double releaseAtSec;
+
+        DelayedTouchRelease(int touchId, double releaseAtSec) {
+            this.touchId = touchId;
+            this.releaseAtSec = releaseAtSec;
         }
     }
 }
