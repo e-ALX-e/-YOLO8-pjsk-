@@ -19,8 +19,8 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.Button;
 import android.widget.TextView;
 
 import com.pjsk.autoplayer.core.Config;
@@ -42,9 +42,7 @@ public final class DetectionPreviewOverlay {
     private static final int COLOR_BUTTON = Color.rgb(44, 53, 68);
     private static final int COLOR_BUTTON_BORDER = Color.rgb(84, 99, 122);
     private static final int COLOR_BUTTON_TEXT = Color.rgb(238, 244, 250);
-
     private final Context context;
-    private final Runnable onCloseClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private WindowManager windowManager;
@@ -60,9 +58,8 @@ public final class DetectionPreviewOverlay {
     private float downRawX;
     private float downRawY;
 
-    public DetectionPreviewOverlay(Context context, Runnable onCloseClick) {
+    public DetectionPreviewOverlay(Context context) {
         this.context = context.getApplicationContext();
-        this.onCloseClick = onCloseClick;
         anchorX = dp(258);
         anchorY = 0;
     }
@@ -219,13 +216,14 @@ public final class DetectionPreviewOverlay {
     private LinearLayout buildView() {
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(8), dp(6), dp(8), dp(8));
+        root.setPadding(dp(6), dp(6), dp(6), dp(6));
         root.setBackground(makeBackground());
         root.setOnTouchListener((view, event) -> handleDrag(event));
 
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setVisibility(View.GONE);
 
         TextView title = new TextView(context);
         title.setText("识别预览");
@@ -246,7 +244,7 @@ public final class DetectionPreviewOverlay {
         close.setTextColor(COLOR_BUTTON_TEXT);
         close.setPadding(dp(4), 0, dp(4), 0);
         close.setBackground(makeButtonBackground(COLOR_BUTTON, COLOR_BUTTON_BORDER));
-        close.setOnClickListener(v -> onCloseClick.run());
+        close.setOnClickListener(v -> {});
         header.addView(close, new LinearLayout.LayoutParams(dp(52), dp(30)));
 
         root.addView(header, new LinearLayout.LayoutParams(
@@ -257,7 +255,6 @@ public final class DetectionPreviewOverlay {
         LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
                 dp(PREVIEW_WIDTH_DP),
                 dp(PREVIEW_HEIGHT_DP));
-        previewParams.setMargins(0, dp(6), 0, 0);
         root.addView(previewView, previewParams);
 
         return root;

@@ -1347,7 +1347,7 @@ public final class CaptureService extends Service {
         }
 
         if (previewOverlay == null) {
-            previewOverlay = new DetectionPreviewOverlay(this, () -> setPreviewEnabled(false));
+            previewOverlay = new DetectionPreviewOverlay(this);
         }
         syncPreviewPosition();
         previewOverlay.show();
