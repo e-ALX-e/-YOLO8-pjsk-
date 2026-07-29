@@ -35,6 +35,13 @@ import java.util.Locale;
 public final class DetectionPreviewOverlay {
     private static final String TAG = "PJSK-PreviewOverlay";
     private static final long PREVIEW_INTERVAL_MS = 83;
+    private static final int PREVIEW_WIDTH_DP = 280;
+    private static final int PREVIEW_HEIGHT_DP = 158;
+    private static final int COLOR_PANEL = Color.rgb(22, 28, 39);
+    private static final int COLOR_PANEL_BORDER = Color.rgb(164, 183, 211);
+    private static final int COLOR_BUTTON = Color.rgb(44, 53, 68);
+    private static final int COLOR_BUTTON_BORDER = Color.rgb(84, 99, 122);
+    private static final int COLOR_BUTTON_TEXT = Color.rgb(238, 244, 250);
 
     private final Context context;
     private final Runnable onCloseClick;
@@ -59,7 +66,7 @@ public final class DetectionPreviewOverlay {
     public DetectionPreviewOverlay(Context context, Runnable onCloseClick) {
         this.context = context.getApplicationContext();
         this.onCloseClick = onCloseClick;
-        anchorX = dp(268);
+        anchorX = dp(258);
         anchorY = 0;
     }
 
@@ -220,7 +227,7 @@ public final class DetectionPreviewOverlay {
     private LinearLayout buildView() {
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(10), dp(8), dp(10), dp(10));
+        root.setPadding(dp(8), dp(6), dp(8), dp(8));
         root.setBackground(makeBackground());
         root.setOnTouchListener((view, event) -> handleDrag(event));
 
@@ -230,8 +237,8 @@ public final class DetectionPreviewOverlay {
 
         TextView title = new TextView(context);
         title.setText("识别预览");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(14f);
+        title.setTextColor(Color.rgb(151, 210, 255));
+        title.setTextSize(13f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         header.addView(title, new LinearLayout.LayoutParams(
                 0,
@@ -243,9 +250,12 @@ public final class DetectionPreviewOverlay {
         close.setAllCaps(false);
         close.setMinHeight(0);
         close.setMinimumHeight(0);
-        close.setPadding(dp(8), 0, dp(8), 0);
+        close.setTextSize(11f);
+        close.setTextColor(COLOR_BUTTON_TEXT);
+        close.setPadding(dp(4), 0, dp(4), 0);
+        close.setBackground(makeButtonBackground(COLOR_BUTTON, COLOR_BUTTON_BORDER));
         close.setOnClickListener(v -> onCloseClick.run());
-        header.addView(close, new LinearLayout.LayoutParams(dp(72), dp(34)));
+        header.addView(close, new LinearLayout.LayoutParams(dp(52), dp(30)));
 
         root.addView(header, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -253,8 +263,10 @@ public final class DetectionPreviewOverlay {
 
         previewView = new PreviewView(context, this::setActionYFromPreview);
         previewView.setCalibrationLocked(calibrationLocked);
-        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(dp(360), dp(210));
-        previewParams.setMargins(0, dp(8), 0, 0);
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                dp(PREVIEW_WIDTH_DP),
+                dp(PREVIEW_HEIGHT_DP));
+        previewParams.setMargins(0, dp(6), 0, 0);
         root.addView(previewView, previewParams);
 
         root.addView(buildCalibrationControls(), new LinearLayout.LayoutParams(
@@ -268,23 +280,31 @@ public final class DetectionPreviewOverlay {
     private LinearLayout buildCalibrationControls() {
         LinearLayout wrapper = new LinearLayout(context);
         wrapper.setOrientation(LinearLayout.VERTICAL);
-        wrapper.setPadding(0, dp(6), 0, 0);
+        wrapper.setPadding(0, dp(5), 0, 0);
+
+        LinearLayout infoRow = new LinearLayout(context);
+        infoRow.setOrientation(LinearLayout.HORIZONTAL);
+        infoRow.setGravity(Gravity.CENTER_VERTICAL);
 
         calibrationView = new TextView(context);
         calibrationView.setTextColor(Color.rgb(225, 232, 240));
-        calibrationView.setTextSize(12f);
-        calibrationView.setGravity(Gravity.CENTER);
-        wrapper.addView(calibrationView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        calibrationView.setTextSize(11f);
+        calibrationView.setGravity(Gravity.CENTER_VERTICAL);
+        infoRow.addView(calibrationView, new LinearLayout.LayoutParams(
+                0,
+                dp(30),
+                1f));
 
         calibrationLockButton = makeCalibrationButton("");
         calibrationLockButton.setOnClickListener(v -> setCalibrationLocked(!calibrationLocked));
         LinearLayout.LayoutParams lockParams = new LinearLayout.LayoutParams(
+                dp(94),
+                dp(30));
+        lockParams.setMargins(dp(6), 0, 0, 0);
+        infoRow.addView(calibrationLockButton, lockParams);
+        wrapper.addView(infoRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(32));
-        lockParams.setMargins(0, dp(4), 0, 0);
-        wrapper.addView(calibrationLockButton, lockParams);
+                LinearLayout.LayoutParams.WRAP_CONTENT));
         updateCalibrationLockButton();
 
         LinearLayout row = new LinearLayout(context);
@@ -293,25 +313,25 @@ public final class DetectionPreviewOverlay {
 
         Button up = makeCalibrationButton("上移");
         up.setOnClickListener(v -> adjustActionY(-2.0));
-        row.addView(up, new LinearLayout.LayoutParams(0, dp(32), 1f));
+        row.addView(up, new LinearLayout.LayoutParams(0, dp(30), 1f));
 
         Button reset = makeCalibrationButton("重置");
         reset.setOnClickListener(v -> {
             AppSettings.resetActionY(context);
             refreshActionY();
         });
-        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(0, dp(32), 1f);
-        resetParams.setMargins(dp(6), 0, dp(6), 0);
+        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(0, dp(30), 1f);
+        resetParams.setMargins(dp(5), 0, dp(5), 0);
         row.addView(reset, resetParams);
 
         Button down = makeCalibrationButton("下移");
         down.setOnClickListener(v -> adjustActionY(2.0));
-        row.addView(down, new LinearLayout.LayoutParams(0, dp(32), 1f));
+        row.addView(down, new LinearLayout.LayoutParams(0, dp(30), 1f));
 
         LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        rowParams.setMargins(0, dp(4), 0, 0);
+        rowParams.setMargins(0, dp(5), 0, 0);
         wrapper.addView(row, rowParams);
         return wrapper;
     }
@@ -323,7 +343,9 @@ public final class DetectionPreviewOverlay {
         button.setAllCaps(false);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
-        button.setPadding(dp(4), 0, dp(4), 0);
+        button.setTextColor(COLOR_BUTTON_TEXT);
+        button.setPadding(dp(3), 0, dp(3), 0);
+        button.setBackground(makeButtonBackground(COLOR_BUTTON, COLOR_BUTTON_BORDER));
         return button;
     }
 
@@ -401,8 +423,8 @@ public final class DetectionPreviewOverlay {
     }
 
     private Bitmap makePreviewBitmap(Bitmap frame, int frameWidth, int frameHeight) {
-        int maxWidth = dp(360);
-        int maxHeight = dp(210);
+        int maxWidth = dp(PREVIEW_WIDTH_DP);
+        int maxHeight = dp(PREVIEW_HEIGHT_DP);
         float aspect = frameWidth / (float) Math.max(1, frameHeight);
         int targetWidth = maxWidth;
         int targetHeight = Math.max(1, Math.round(maxWidth / aspect));
@@ -434,9 +456,20 @@ public final class DetectionPreviewOverlay {
 
     private GradientDrawable makeBackground() {
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.argb(230, 18, 22, 30));
-        drawable.setCornerRadius(dp(8));
-        drawable.setStroke(dp(1), Color.argb(140, 255, 255, 255));
+        drawable.setColor(Color.argb(238, Color.red(COLOR_PANEL), Color.green(COLOR_PANEL), Color.blue(COLOR_PANEL)));
+        drawable.setCornerRadius(dp(10));
+        drawable.setStroke(dp(1), Color.argb(145,
+                Color.red(COLOR_PANEL_BORDER),
+                Color.green(COLOR_PANEL_BORDER),
+                Color.blue(COLOR_PANEL_BORDER)));
+        return drawable;
+    }
+
+    private GradientDrawable makeButtonBackground(int color, int borderColor) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(7));
+        drawable.setStroke(dp(1), borderColor);
         return drawable;
     }
 
