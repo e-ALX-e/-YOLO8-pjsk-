@@ -1,7 +1,6 @@
 #include <jni.h>
 #include <android/asset_manager_jni.h>
 #include <android/bitmap.h>
-#include <android/log.h>
 
 #include <algorithm>
 #include <cmath>
@@ -15,24 +14,6 @@
 #endif
 
 namespace {
-
-constexpr int kClassCount = 4;
-constexpr const char* kParamPath = "model_ncnn_model/model.ncnn.param";
-constexpr const char* kBinPath = "model_ncnn_model/model.ncnn.bin";
-
-float g_confidence = 0.6f;
-float g_iou = 0.45f;
-int g_input_size = 1280;
-std::string g_status = "NCNN stub";
-
-#ifdef PJSK_WITH_NCNN
-std::mutex g_mutex;
-ncnn::Net g_net;
-bool g_loaded = false;
-bool g_gpu_initialized = false;
-bool g_gpu_enabled = false;
-int g_gpu_count = 0;
-#endif
 
 struct Proposal {
     float x1;
@@ -58,10 +39,7 @@ float intersectionOverUnion(const Proposal& a, const Proposal& b) {
     const float areaA = std::max(0.0f, a.x2 - a.x1) * std::max(0.0f, a.y2 - a.y1);
     const float areaB = std::max(0.0f, b.x2 - b.x1) * std::max(0.0f, b.y2 - b.y1);
     const float denom = areaA + areaB - inter;
-    if (denom <= 0.0f) {
-        return 0.0f;
-    }
-    return inter / denom;
+    return denom <= 0.0f ? 0.0f : inter / denom;
 }
 
 std::vector<Proposal> nms(std::vector<Proposal>& proposals, float iouThreshold) {
@@ -111,39 +89,58 @@ jfloatArray proposalsToArray(JNIEnv* env, const std::vector<Proposal>& proposals
 
 #ifdef PJSK_WITH_NCNN
 
-float outputValue(const ncnn::Mat& out, int channel, int index) {
-    if (out.dims == 2 && out.h >= kClassCount + 4) {
+struct DetectorContext {
+    std::mutex mutex;
+    ncnn::Net net;
+    bool loaded = false;
+    bool gpuEnabled = false;
+    int gpuCount = 0;
+    int classCount = 1;
+    float confidence = 0.6f;
+    float iou = 0.45f;
+    int inputSize = 640;
+    std::string status = "NCNN not loaded";
+};
+
+std::mutex g_gpu_mutex;
+bool g_gpu_initialized = false;
+
+float outputValue(const ncnn::Mat& out, int classCount, int channel, int index) {
+    const int outputWidth = classCount + 4;
+    if (out.dims == 2 && out.h >= outputWidth) {
         return out.row(channel)[index];
     }
-    if (out.dims == 2 && out.w >= kClassCount + 4) {
+    if (out.dims == 2 && out.w >= outputWidth) {
         return out.row(index)[channel];
     }
-    if (out.dims == 3 && out.h >= kClassCount + 4) {
+    if (out.dims == 3 && out.h >= outputWidth) {
         return out.channel(0).row(channel)[index];
     }
-    if (out.dims == 3 && out.w >= kClassCount + 4) {
+    if (out.dims == 3 && out.w >= outputWidth) {
         return out.channel(0).row(index)[channel];
     }
     return 0.0f;
 }
 
-int outputCount(const ncnn::Mat& out) {
-    if (out.dims == 2 && out.h >= kClassCount + 4) {
+int outputCount(const ncnn::Mat& out, int classCount) {
+    const int outputWidth = classCount + 4;
+    if (out.dims == 2 && out.h >= outputWidth) {
         return out.w;
     }
-    if (out.dims == 2 && out.w >= kClassCount + 4) {
+    if (out.dims == 2 && out.w >= outputWidth) {
         return out.h;
     }
-    if (out.dims == 3 && out.h >= kClassCount + 4) {
+    if (out.dims == 3 && out.h >= outputWidth) {
         return out.w;
     }
-    if (out.dims == 3 && out.w >= kClassCount + 4) {
+    if (out.dims == 3 && out.w >= outputWidth) {
         return out.h;
     }
     return 0;
 }
 
 std::vector<Proposal> decodeYoloOutput(
+        DetectorContext* ctx,
         const ncnn::Mat& out,
         int imageW,
         int imageH,
@@ -151,38 +148,33 @@ std::vector<Proposal> decodeYoloOutput(
         int padLeft,
         int padTop) {
     std::vector<Proposal> proposals;
-    int count = outputCount(out);
+    int count = outputCount(out, ctx->classCount);
     proposals.reserve(128);
 
     for (int i = 0; i < count; i++) {
         float bestScore = 0.0f;
         int bestClass = -1;
-        for (int c = 0; c < kClassCount; c++) {
-            float score = outputValue(out, 4 + c, i);
+        for (int c = 0; c < ctx->classCount; c++) {
+            float score = outputValue(out, ctx->classCount, 4 + c, i);
             if (score > bestScore) {
                 bestScore = score;
                 bestClass = c;
             }
         }
-        if (bestScore < g_confidence || bestClass < 0) {
+        if (bestScore < ctx->confidence || bestClass < 0) {
             continue;
         }
 
-        const float cx = outputValue(out, 0, i);
-        const float cy = outputValue(out, 1, i);
-        const float bw = outputValue(out, 2, i);
-        const float bh = outputValue(out, 3, i);
-
-        float x1 = (cx - bw * 0.5f - padLeft) / scale;
-        float y1 = (cy - bh * 0.5f - padTop) / scale;
-        float x2 = (cx + bw * 0.5f - padLeft) / scale;
-        float y2 = (cy + bh * 0.5f - padTop) / scale;
+        const float cx = outputValue(out, ctx->classCount, 0, i);
+        const float cy = outputValue(out, ctx->classCount, 1, i);
+        const float bw = outputValue(out, ctx->classCount, 2, i);
+        const float bh = outputValue(out, ctx->classCount, 3, i);
 
         Proposal p{};
-        p.x1 = clampf(x1, 0.0f, static_cast<float>(imageW - 1));
-        p.y1 = clampf(y1, 0.0f, static_cast<float>(imageH - 1));
-        p.x2 = clampf(x2, 0.0f, static_cast<float>(imageW - 1));
-        p.y2 = clampf(y2, 0.0f, static_cast<float>(imageH - 1));
+        p.x1 = clampf((cx - bw * 0.5f - padLeft) / scale, 0.0f, static_cast<float>(imageW - 1));
+        p.y1 = clampf((cy - bh * 0.5f - padTop) / scale, 0.0f, static_cast<float>(imageH - 1));
+        p.x2 = clampf((cx + bw * 0.5f - padLeft) / scale, 0.0f, static_cast<float>(imageW - 1));
+        p.y2 = clampf((cy + bh * 0.5f - padTop) / scale, 0.0f, static_cast<float>(imageH - 1));
         p.score = bestScore;
         p.label = bestClass;
         if (p.x2 > p.x1 && p.y2 > p.y1) {
@@ -194,71 +186,109 @@ std::vector<Proposal> decodeYoloOutput(
 
 #endif
 
+std::string jstringToString(JNIEnv* env, jstring value) {
+    if (value == nullptr) {
+        return "";
+    }
+    const char* chars = env->GetStringUTFChars(value, nullptr);
+    std::string result = chars == nullptr ? "" : chars;
+    if (chars != nullptr) {
+        env->ReleaseStringUTFChars(value, chars);
+    }
+    return result;
+}
+
 }  // namespace
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_pjsk_autoplayer_ncnn_NcnnDetector_nativeInit(
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_pjsk_autoplayer_ncnn_NcnnDetector_nativeCreate(
         JNIEnv* env,
         jobject,
         jobject assetManager,
+        jstring paramPath,
+        jstring binPath,
+        jint classCount,
         jfloat confidence,
         jfloat iou,
         jint inputSize) {
-    g_confidence = confidence;
-    g_iou = iou;
-    g_input_size = std::max(320, std::min(1280, static_cast<int>(inputSize)));
-    g_input_size = (g_input_size / 32) * 32;
-
 #ifndef PJSK_WITH_NCNN
     (void) env;
     (void) assetManager;
-    g_status = "NCNN SDK missing, detector stub active";
-    return JNI_FALSE;
+    (void) paramPath;
+    (void) binPath;
+    (void) classCount;
+    (void) confidence;
+    (void) iou;
+    (void) inputSize;
+    return 0;
 #else
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
     if (mgr == nullptr) {
-        g_status = "AAssetManager is null";
-        return JNI_FALSE;
+        return 0;
     }
 
-    std::lock_guard<std::mutex> lock(g_mutex);
-    g_net.clear();
-    g_net.opt.num_threads = 4;
-    g_net.opt.use_fp16_packed = true;
-    g_net.opt.use_fp16_storage = true;
-    g_net.opt.use_fp16_arithmetic = false;
+    DetectorContext* ctx = new DetectorContext();
+    ctx->classCount = std::max(1, static_cast<int>(classCount));
+    ctx->confidence = confidence;
+    ctx->iou = iou;
+    ctx->inputSize = std::max(320, std::min(1280, static_cast<int>(inputSize)));
+    ctx->inputSize = (ctx->inputSize / 32) * 32;
+
+    ctx->net.opt.num_threads = 4;
+    ctx->net.opt.use_fp16_packed = true;
+    ctx->net.opt.use_fp16_storage = true;
+    ctx->net.opt.use_fp16_arithmetic = false;
 
 #if NCNN_VULKAN
-    if (!g_gpu_initialized) {
-        g_gpu_initialized = ncnn::create_gpu_instance() == 0;
+    {
+        std::lock_guard<std::mutex> lock(g_gpu_mutex);
+        if (!g_gpu_initialized) {
+            g_gpu_initialized = ncnn::create_gpu_instance() == 0;
+        }
     }
-    g_gpu_count = g_gpu_initialized ? ncnn::get_gpu_count() : 0;
-    g_gpu_enabled = g_gpu_count > 0;
-    g_net.opt.use_vulkan_compute = g_gpu_enabled;
-    if (g_gpu_enabled) {
-        g_net.set_vulkan_device(ncnn::get_default_gpu_index());
+    ctx->gpuCount = g_gpu_initialized ? ncnn::get_gpu_count() : 0;
+    ctx->gpuEnabled = ctx->gpuCount > 0;
+    ctx->net.opt.use_vulkan_compute = ctx->gpuEnabled;
+    if (ctx->gpuEnabled) {
+        ctx->net.set_vulkan_device(ncnn::get_default_gpu_index());
     }
 #else
-    g_gpu_count = 0;
-    g_gpu_enabled = false;
-    g_net.opt.use_vulkan_compute = false;
+    ctx->gpuCount = 0;
+    ctx->gpuEnabled = false;
+    ctx->net.opt.use_vulkan_compute = false;
 #endif
 
-    if (g_net.load_param(mgr, kParamPath) != 0) {
-        g_status = "failed to load model.ncnn.param";
-        g_loaded = false;
-        return JNI_FALSE;
+    std::string param = jstringToString(env, paramPath);
+    std::string bin = jstringToString(env, binPath);
+    if (ctx->net.load_param(mgr, param.c_str()) != 0) {
+        ctx->status = "failed to load " + param;
+        delete ctx;
+        return 0;
     }
-    if (g_net.load_model(mgr, kBinPath) != 0) {
-        g_status = "failed to load model.ncnn.bin";
-        g_loaded = false;
-        return JNI_FALSE;
+    if (ctx->net.load_model(mgr, bin.c_str()) != 0) {
+        ctx->status = "failed to load " + bin;
+        delete ctx;
+        return 0;
     }
-    g_loaded = true;
-    g_status = "NCNN loaded input=" + std::to_string(g_input_size)
-            + " gpu=" + (g_gpu_enabled ? "on" : "off")
-            + " gpu_count=" + std::to_string(g_gpu_count);
-    return JNI_TRUE;
+    ctx->loaded = true;
+    ctx->status = "NCNN loaded input=" + std::to_string(ctx->inputSize)
+            + " classes=" + std::to_string(ctx->classCount)
+            + " gpu=" + (ctx->gpuEnabled ? "on" : "off")
+            + " gpu_count=" + std::to_string(ctx->gpuCount);
+    return reinterpret_cast<jlong>(ctx);
+#endif
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_pjsk_autoplayer_ncnn_NcnnDetector_nativeRelease(
+        JNIEnv*,
+        jobject,
+        jlong handle) {
+#ifdef PJSK_WITH_NCNN
+    DetectorContext* ctx = reinterpret_cast<DetectorContext*>(handle);
+    delete ctx;
+#else
+    (void) handle;
 #endif
 }
 
@@ -266,12 +296,15 @@ extern "C" JNIEXPORT jfloatArray JNICALL
 Java_com_pjsk_autoplayer_ncnn_NcnnDetector_nativeDetect(
         JNIEnv* env,
         jobject,
+        jlong handle,
         jobject bitmap) {
 #ifndef PJSK_WITH_NCNN
+    (void) handle;
     (void) bitmap;
     return env->NewFloatArray(0);
 #else
-    if (!g_loaded || bitmap == nullptr) {
+    DetectorContext* ctx = reinterpret_cast<DetectorContext*>(handle);
+    if (ctx == nullptr || !ctx->loaded || bitmap == nullptr) {
         return env->NewFloatArray(0);
     }
 
@@ -289,7 +322,7 @@ Java_com_pjsk_autoplayer_ncnn_NcnnDetector_nativeDetect(
 
     const int imageW = static_cast<int>(info.width);
     const int imageH = static_cast<int>(info.height);
-    const int inputSize = g_input_size;
+    const int inputSize = ctx->inputSize;
     const float scale = std::min(inputSize / static_cast<float>(imageW),
                                  inputSize / static_cast<float>(imageH));
     const int resizedW = static_cast<int>(std::round(imageW * scale));
@@ -324,8 +357,8 @@ Java_com_pjsk_autoplayer_ncnn_NcnnDetector_nativeDetect(
 
     ncnn::Mat out;
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        ncnn::Extractor ex = g_net.create_extractor();
+        std::lock_guard<std::mutex> lock(ctx->mutex);
+        ncnn::Extractor ex = ctx->net.create_extractor();
         ex.set_light_mode(true);
         if (ex.input("in0", padded) != 0) {
             return env->NewFloatArray(0);
@@ -335,8 +368,8 @@ Java_com_pjsk_autoplayer_ncnn_NcnnDetector_nativeDetect(
         }
     }
 
-    std::vector<Proposal> proposals = decodeYoloOutput(out, imageW, imageH, scale, padLeft, padTop);
-    std::vector<Proposal> picked = nms(proposals, g_iou);
+    std::vector<Proposal> proposals = decodeYoloOutput(ctx, out, imageW, imageH, scale, padLeft, padTop);
+    std::vector<Proposal> picked = nms(proposals, ctx->iou);
     return proposalsToArray(env, picked);
 #endif
 }
@@ -344,6 +377,16 @@ Java_com_pjsk_autoplayer_ncnn_NcnnDetector_nativeDetect(
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_pjsk_autoplayer_ncnn_NcnnDetector_nativeStatus(
         JNIEnv* env,
-        jobject) {
-    return env->NewStringUTF(g_status.c_str());
+        jobject,
+        jlong handle) {
+#ifdef PJSK_WITH_NCNN
+    DetectorContext* ctx = reinterpret_cast<DetectorContext*>(handle);
+    if (ctx == nullptr) {
+        return env->NewStringUTF("NCNN unavailable");
+    }
+    return env->NewStringUTF(ctx->status.c_str());
+#else
+    (void) handle;
+    return env->NewStringUTF("NCNN SDK missing, detector stub active");
+#endif
 }

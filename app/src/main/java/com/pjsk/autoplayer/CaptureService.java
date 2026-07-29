@@ -15,10 +15,12 @@ import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Log;
 
+import com.pjsk.autoplayer.core.AutoContinueController;
 import com.pjsk.autoplayer.core.AutoPlayer;
 import com.pjsk.autoplayer.core.Detection;
 import com.pjsk.autoplayer.input.RootEventInjector;
 import com.pjsk.autoplayer.ncnn.NcnnDetector;
+import com.pjsk.autoplayer.ncnn.UiButtonDetector;
 import com.pjsk.autoplayer.overlay.DetectionPreviewOverlay;
 import com.pjsk.autoplayer.overlay.StatusOverlay;
 import com.pjsk.autoplayer.screen.ScreenCaptureSource;
@@ -26,6 +28,7 @@ import com.pjsk.autoplayer.settings.AppSettings;
 import com.pjsk.autoplayer.settings.DebugDisplayController;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
@@ -58,7 +61,9 @@ public final class CaptureService extends Service {
 
     private ScreenCaptureSource captureSource;
     private NcnnDetector detector;
+    private UiButtonDetector uiButtonDetector;
     private AutoPlayer autoPlayer;
+    private AutoContinueController autoContinueController;
     private RootEventInjector injector;
     private StatusOverlay statusOverlay;
     private DetectionPreviewOverlay previewOverlay;
@@ -81,6 +86,7 @@ public final class CaptureService extends Service {
     private long clickResumeAtMs;
     private boolean previousNoClickMode;
     private String detectorStatus = "";
+    private String autoContinueStatus = AutoContinueController.STATUS_PLAYING;
 
     public static boolean isRunning() {
         return running;
@@ -146,6 +152,7 @@ public final class CaptureService extends Service {
         Log.i(TAG, "detector status: " + detectorStatus);
         injector = new RootEventInjector(this);
         autoPlayer = new AutoPlayer(injector, this::recordAction);
+        updateAutoSoloRuntime(AppSettings.isAutoSoloModeEnabled(this));
         resetCounters();
         previousNoClickMode = AppSettings.isNoClickMode(this);
         clickResumeAtMs = 0L;
@@ -203,9 +210,37 @@ public final class CaptureService extends Service {
                 return;
             }
 
+            AutoContinueController currentAutoContinueController = autoContinueController;
+            if (AppSettings.isAutoSoloModeEnabled(this)) {
+                if (currentAutoContinueController == null) {
+                    updateAutoSoloRuntime(true);
+                    currentAutoContinueController = autoContinueController;
+                }
+            } else if (currentAutoContinueController != null || uiButtonDetector != null) {
+                updateAutoSoloRuntime(false);
+                currentAutoContinueController = null;
+            }
+
+            if (currentAutoContinueController != null) {
+                updateClickMode(currentAutoPlayer);
+                currentAutoContinueController.onFrame(
+                        frame.bitmap,
+                        frame.displayWidth,
+                        frame.displayHeight,
+                        isClickBlockedNow(),
+                        Collections.emptyList());
+                autoContinueStatus = currentAutoContinueController.statusText();
+                if (currentAutoContinueController.shouldSuppressGameRecognition()) {
+                    currentAutoPlayer.setClickEnabled(false);
+                    handleAutoContinueFrame(frame, inferenceStartMs, currentAutoContinueController);
+                    return;
+                }
+            }
+
             long detectStartMs = SystemClock.elapsedRealtime();
             List<Detection> detections = currentDetector.detect(frame.bitmap);
             long detectMs = Math.max(0L, SystemClock.elapsedRealtime() - detectStartMs);
+
             double actionYBase = AppSettings.getActionY(this);
             currentAutoPlayer.setActionYBase(actionYBase);
             updateClickMode(currentAutoPlayer);
@@ -269,6 +304,61 @@ public final class CaptureService extends Service {
         }
     }
 
+    private void handleAutoContinueFrame(
+            ScreenCaptureSource.Frame frame,
+            long inferenceStartMs,
+            AutoContinueController currentAutoContinueController) {
+        lastInferenceMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
+        recordProcessedFrame();
+        updateRuntimeStatus(0);
+        updatePreview(
+                frame,
+                currentAutoContinueController.buttonDetectionsForPreview(),
+                lastInferenceMs,
+                AppSettings.getActionY(this),
+                true);
+
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastDiagnosticsLogMs >= 1000) {
+            lastDiagnosticsLogMs = now;
+            Log.i(TAG, "frame=" + frame.width + "x" + frame.height
+                    + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                    + " fps=" + String.format(Locale.US, "%.1f", currentFps)
+                    + " infer=" + lastInferenceMs + "ms"
+                    + " stageMs=capture:" + frame.captureMs
+                    + ",detect:paused:autoContinue"
+                    + ",preview:autoContinue"
+                    + ",action:paused"
+                    + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
+                    + " autoContinue=" + autoContinueStatus);
+        }
+    }
+
+    private void updateAutoSoloRuntime(boolean enabled) {
+        if (!enabled) {
+            autoContinueController = null;
+            if (uiButtonDetector != null) {
+                uiButtonDetector.close();
+                uiButtonDetector = null;
+            }
+            autoContinueStatus = AutoContinueController.STATUS_PLAYING;
+            return;
+        }
+
+        if (injector == null) {
+            return;
+        }
+        if (uiButtonDetector == null) {
+            uiButtonDetector = new UiButtonDetector(this);
+            Log.i(TAG, "button detector status: " + uiButtonDetector.status());
+        }
+        if (autoContinueController == null) {
+            autoContinueController = new AutoContinueController(injector, uiButtonDetector);
+            autoContinueController.reset();
+            autoContinueStatus = autoContinueController.statusText();
+        }
+    }
+
     private void resetCounters() {
         synchronized (metricsLock) {
             totalFrames = 0;
@@ -283,6 +373,10 @@ public final class CaptureService extends Service {
         lastNotificationUpdateMs = 0L;
         lastDiagnosticsLogMs = 0L;
         clickResumeAtMs = 0L;
+        autoContinueStatus = AutoContinueController.STATUS_PLAYING;
+        if (autoContinueController != null) {
+            autoContinueController.reset();
+        }
         totalActions.set(0);
         tapActions.set(0);
         holdActions.set(0);
@@ -373,6 +467,8 @@ public final class CaptureService extends Service {
             if (statusOverlay != null) {
                 statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
                 statusOverlay.setClickBlocked(isClickBlockedNow());
+                statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
+                statusOverlay.setAutoContinueStatus(autoContinueStatus);
             }
         }
 
@@ -389,13 +485,15 @@ public final class CaptureService extends Service {
     private String formatStatus(int detectionCount) {
         return String.format(
                 Locale.US,
-                "运行中\nFPS：%.1f  Drop/s：%.1f  Infer：%dms\nTotal：%d  DropTotal：%d  识别：%d\n点击：%s  动作：%d  Tap：%d  Hold：%d  Flick：%d\n判定：%.0f  映射：%s  最后：%s\n模型：%s",
+                "运行中\nFPS：%.1f  Drop/s：%.1f  Infer：%dms\nTotal：%d  DropTotal：%d  识别：%d\n状态：%s  自动单人：%s  点击：%s\n动作：%d  Tap：%d  Hold：%d  Flick：%d\n判定：%.0f  映射：%s  最后：%s\n模型：%s",
                 currentFps,
                 currentDropFps,
                 lastInferenceMs,
                 totalFrames,
                 totalDroppedFrames,
                 detectionCount,
+                autoContinueStatus,
+                AppSettings.isAutoSoloModeEnabled(this) ? "开" : "关",
                 clickModeText(),
                 totalActions.get(),
                 tapActions.get(),
@@ -412,6 +510,15 @@ public final class CaptureService extends Service {
             List<Detection> detections,
             long inferenceMs,
             double actionYBase) {
+        updatePreview(frame, detections, inferenceMs, actionYBase, false);
+    }
+
+    private void updatePreview(
+            ScreenCaptureSource.Frame frame,
+            List<Detection> detections,
+            long inferenceMs,
+            double actionYBase,
+            boolean buttonLabels) {
         DetectionPreviewOverlay overlay = previewOverlay;
         if (overlay == null || !overlay.isShown()) {
             return;
@@ -424,7 +531,8 @@ public final class CaptureService extends Service {
                 currentFps,
                 inferenceMs,
                 totalDroppedFrames,
-                actionYBase);
+                actionYBase,
+                buttonLabels);
     }
 
     private void failStart(String text) {
@@ -458,6 +566,14 @@ public final class CaptureService extends Service {
         }
         processing.set(false);
         autoPlayer = null;
+        autoContinueController = null;
+        if (uiButtonDetector != null) {
+            uiButtonDetector.close();
+            uiButtonDetector = null;
+        }
+        if (detector != null) {
+            detector.close();
+        }
         detector = null;
         detectorStatus = "";
         resetCounters();
@@ -470,12 +586,15 @@ public final class CaptureService extends Service {
                 stopSelf();
             }, () -> setPreviewEnabled(!AppSettings.isPreviewEnabled(this)),
                     this::toggleNoClickMode,
+                    this::toggleAutoSoloMode,
                     this::toggleDebugDisplay);
         }
         statusOverlay.show(text);
         statusOverlay.setPreviewEnabled(AppSettings.isPreviewEnabled(this));
         statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
         statusOverlay.setClickBlocked(isClickBlockedNow());
+        statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
+        statusOverlay.setAutoContinueStatus(autoContinueStatus);
         statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
     }
 
@@ -493,6 +612,17 @@ public final class CaptureService extends Service {
             statusOverlay.setClickBlocked(true);
         }
         updateNotification(enabled ? "已开启不点击模式" : "5 秒后恢复点击");
+    }
+
+    private void toggleAutoSoloMode() {
+        boolean enabled = !AppSettings.isAutoSoloModeEnabled(this);
+        AppSettings.setAutoSoloModeEnabled(this, enabled);
+        updateAutoSoloRuntime(enabled);
+        if (statusOverlay != null) {
+            statusOverlay.setAutoSoloMode(enabled);
+            statusOverlay.setAutoContinueStatus(autoContinueStatus);
+        }
+        updateNotification(enabled ? "已开启自动单人模式" : "已关闭自动单人模式");
     }
 
     private void toggleDebugDisplay() {
@@ -613,3 +743,4 @@ public final class CaptureService extends Service {
         return null;
     }
 }
+

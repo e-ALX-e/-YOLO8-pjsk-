@@ -13,9 +13,12 @@ import java.util.List;
 
 public final class NcnnDetector {
     private static final String TAG = "PJSK-NCNN";
+    private static final String NOTE_PARAM_PATH = "model_ncnn_model/model.ncnn.param";
+    private static final String NOTE_BIN_PATH = "model_ncnn_model/model.ncnn.bin";
 
     private boolean nativeAvailable;
     private String status = "native library not loaded";
+    private long nativeHandle;
     private static boolean libraryLoaded;
 
     static {
@@ -28,6 +31,24 @@ public final class NcnnDetector {
     }
 
     public NcnnDetector(Context context) {
+        this(
+                context,
+                NOTE_PARAM_PATH,
+                NOTE_BIN_PATH,
+                4,
+                Config.MODEL_CONFIDENCE,
+                Config.NMS_IOU,
+                Config.MODEL_IMAGE_SIZE);
+    }
+
+    public NcnnDetector(
+            Context context,
+            String paramPath,
+            String binPath,
+            int classCount,
+            float confidence,
+            float iou,
+            int inputSize) {
         if (!libraryLoaded) {
             nativeAvailable = false;
             status = "native library not loaded; detector stub active";
@@ -35,12 +56,16 @@ public final class NcnnDetector {
         }
         try {
             AssetManager assets = context.getAssets();
-            nativeAvailable = nativeInit(
+            nativeHandle = nativeCreate(
                     assets,
-                    Config.MODEL_CONFIDENCE,
-                    Config.NMS_IOU,
-                    Config.MODEL_IMAGE_SIZE);
-            status = nativeStatus();
+                    paramPath,
+                    binPath,
+                    classCount,
+                    confidence,
+                    iou,
+                    inputSize);
+            nativeAvailable = nativeHandle != 0L;
+            status = nativeStatus(nativeHandle);
         } catch (Throwable t) {
             nativeAvailable = false;
             status = "NCNN unavailable: " + t.getMessage();
@@ -53,7 +78,7 @@ public final class NcnnDetector {
         if (!nativeAvailable || bitmap == null || bitmap.isRecycled()) {
             return detections;
         }
-        float[] raw = nativeDetect(bitmap);
+        float[] raw = nativeDetect(nativeHandle, bitmap);
         if (raw == null) {
             return detections;
         }
@@ -73,13 +98,26 @@ public final class NcnnDetector {
         return status;
     }
 
-    private native boolean nativeInit(
+    public void close() {
+        if (nativeHandle != 0L) {
+            nativeRelease(nativeHandle);
+            nativeHandle = 0L;
+        }
+        nativeAvailable = false;
+    }
+
+    private native long nativeCreate(
             AssetManager assetManager,
+            String paramPath,
+            String binPath,
+            int classCount,
             float confidence,
             float iou,
             int inputSize);
 
-    private native float[] nativeDetect(Bitmap bitmap);
+    private native void nativeRelease(long handle);
 
-    private native String nativeStatus();
+    private native float[] nativeDetect(long handle, Bitmap bitmap);
+
+    private native String nativeStatus(long handle);
 }
