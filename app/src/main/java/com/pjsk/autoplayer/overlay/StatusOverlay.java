@@ -13,31 +13,51 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.ArrayAdapter;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import com.pjsk.autoplayer.core.AutoContinueController;
+import com.pjsk.autoplayer.settings.AppSettings;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 public final class StatusOverlay {
     private static final String TAG = "PJSK-StatusOverlay";
     private static final int MIN_OVERLAY_WIDTH_DP = 210;
     private static final int MAX_OVERLAY_WIDTH_DP = 250;
+    private static final int PARAMETER_PANEL_WIDTH_DP = 218;
+    private static final int PARAMETER_PANEL_GAP_DP = 8;
+    private static final int CONTROL_AREA_HEIGHT_DP = 150;
+    private static final int COLOR_BUTTON = Color.rgb(44, 53, 68);
+    private static final int COLOR_BUTTON_BORDER = Color.rgb(84, 99, 122);
+    private static final int COLOR_BUTTON_TEXT = Color.rgb(238, 244, 250);
 
     private final Context context;
     private final Runnable onStopClick;
+    private final Runnable onHideClick;
     private final Runnable onPreviewClick;
     private final Runnable onNoClickClick;
     private final Runnable onAutoSoloClick;
     private final Runnable onLogicPlayClick;
     private final Runnable onLogicProfileClick;
     private final Runnable onResetStateClick;
+    private final Runnable onScreenRecordClick;
+    private final Runnable onCustomClick;
     private final Runnable onDebugDisplayClick;
+    private final Runnable onOverlayPositionChanged;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private WindowManager windowManager;
     private WindowManager.LayoutParams params;
+    private WindowManager.LayoutParams parameterWindowParams;
     private LinearLayout rootView;
     private LinearLayout contentView;
     private LinearLayout parameterView;
@@ -45,6 +65,7 @@ public final class StatusOverlay {
     private TextView autoContinueStatusView;
     private TextView statusView;
     private Button collapseButton;
+    private Button hideButton;
     private Button detailsButton;
     private Button previewButton;
     private Button noClickButton;
@@ -52,7 +73,16 @@ public final class StatusOverlay {
     private Button logicPlayButton;
     private Button logicProfileButton;
     private Button resetStateButton;
+    private Button screenRecordButton;
+    private Button customButton;
     private Button debugDisplayButton;
+    private Spinner logicSongSelector;
+    private Spinner logicDifficultySelector;
+    private ArrayAdapter<String> logicSongAdapter;
+    private ArrayAdapter<String> logicDifficultyAdapter;
+    private final List<String> logicSongIds = new ArrayList<>();
+    private final List<String> logicDifficulties = new ArrayList<>();
+    private boolean updatingLogicChartSelectors;
     private boolean collapsed;
     private boolean parametersVisible;
     private boolean clickBlocked;
@@ -68,22 +98,30 @@ public final class StatusOverlay {
     public StatusOverlay(
             Context context,
             Runnable onStopClick,
+            Runnable onHideClick,
             Runnable onPreviewClick,
             Runnable onNoClickClick,
             Runnable onAutoSoloClick,
             Runnable onLogicPlayClick,
             Runnable onLogicProfileClick,
             Runnable onResetStateClick,
-            Runnable onDebugDisplayClick) {
+            Runnable onScreenRecordClick,
+            Runnable onCustomClick,
+            Runnable onDebugDisplayClick,
+            Runnable onOverlayPositionChanged) {
         this.context = context.getApplicationContext();
         this.onStopClick = onStopClick;
+        this.onHideClick = onHideClick;
         this.onPreviewClick = onPreviewClick;
         this.onNoClickClick = onNoClickClick;
         this.onAutoSoloClick = onAutoSoloClick;
         this.onLogicPlayClick = onLogicPlayClick;
         this.onLogicProfileClick = onLogicProfileClick;
         this.onResetStateClick = onResetStateClick;
+        this.onScreenRecordClick = onScreenRecordClick;
+        this.onCustomClick = onCustomClick;
         this.onDebugDisplayClick = onDebugDisplayClick;
+        this.onOverlayPositionChanged = onOverlayPositionChanged;
     }
 
     public static boolean canDrawOverlays(Context context) {
@@ -96,6 +134,22 @@ public final class StatusOverlay {
 
     public boolean isShown() {
         return rootView != null;
+    }
+
+    /** Returns the first free x coordinate directly to the right of this overlay group. */
+    public int adjacentWindowX() {
+        int baseWidth = collapsed && rootView != null && rootView.getWidth() > 0
+                ? rootView.getWidth()
+                : overlayWidthPx();
+        int x = params == null ? 0 : params.x;
+        if (parametersVisible && !collapsed) {
+            baseWidth += dp(PARAMETER_PANEL_GAP_DP + PARAMETER_PANEL_WIDTH_DP);
+        }
+        return x + baseWidth + dp(PARAMETER_PANEL_GAP_DP);
+    }
+
+    public int windowY() {
+        return params == null ? 0 : params.y;
     }
 
     public void updateStatus(String statusText) {
@@ -181,15 +235,55 @@ public final class StatusOverlay {
         });
     }
 
-    public void dismiss() {
+    public void setScreenRecording(boolean recording) {
         mainHandler.post(() -> {
-            if (windowManager == null || rootView == null) {
+            if (screenRecordButton != null) {
+                screenRecordButton.setText(recording ? "结束录屏" : "录屏");
+                screenRecordButton.setTextColor(recording
+                        ? Color.rgb(255, 126, 126)
+                        : Color.rgb(225, 232, 240));
+            }
+        });
+    }
+
+    public void setCustomButton(String actionLabel, boolean visible) {
+        mainHandler.post(() -> {
+            if (customButton == null) {
                 return;
             }
-            try {
-                windowManager.removeView(rootView);
-            } catch (IllegalArgumentException ignored) {
+            customButton.setText("\u81ea\u5b9a\u4e49\uff1a" + actionLabel);
+            customButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+            updateLayout();
+        });
+    }
+
+    /** Lets the main screen expose the same parameter toggle as the overlay. */
+    public void toggleParameters() {
+        mainHandler.post(() -> setParametersVisible(!parametersVisible));
+    }
+
+    /** Lets the main screen expose the same collapse action as the overlay header. */
+    public void toggleCollapsed() {
+        mainHandler.post(() -> setCollapsed(!collapsed));
+    }
+
+    /** Applies layout choices saved before the capture service was started. */
+    public void applyLayoutPreferences(boolean collapsed, boolean parametersVisible) {
+        mainHandler.post(() -> {
+            setCollapsed(collapsed);
+            setParametersVisible(parametersVisible);
+        });
+    }
+
+    public void dismiss() {
+        mainHandler.post(() -> {
+            if (windowManager != null && rootView != null) {
+                try {
+                    windowManager.removeView(rootView);
+                } catch (IllegalArgumentException ignored) {
+                }
             }
+            dismissParameterWindow();
             clearViews();
         });
     }
@@ -225,6 +319,9 @@ public final class StatusOverlay {
 
         try {
             windowManager.addView(rootView, params);
+            if (parametersVisible && !collapsed) {
+                showParameterWindow();
+            }
         } catch (RuntimeException e) {
             Log.e(TAG, "failed to show overlay", e);
             clearViews();
@@ -267,7 +364,14 @@ public final class StatusOverlay {
 
         collapseButton = makeSmallButton("折叠");
         collapseButton.setOnClickListener(v -> setCollapsed(!collapsed));
-        header.addView(collapseButton, new LinearLayout.LayoutParams(dp(54), dp(32)));
+        header.addView(collapseButton, new LinearLayout.LayoutParams(dp(48), dp(32)));
+
+        hideButton = makeSmallButton("隐藏");
+        hideButton.setContentDescription("隐藏窗口");
+        hideButton.setOnClickListener(v -> onHideClick.run());
+        LinearLayout.LayoutParams hideParams = new LinearLayout.LayoutParams(dp(40), dp(32));
+        hideParams.setMargins(dp(4), 0, 0, 0);
+        header.addView(hideButton, hideParams);
 
         root.addView(header, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -278,7 +382,20 @@ public final class StatusOverlay {
 
         parameterView = new LinearLayout(context);
         parameterView.setOrientation(LinearLayout.VERTICAL);
-        parameterView.setVisibility(View.GONE);
+        parameterView.setPadding(dp(8), dp(6), dp(8), dp(6));
+        parameterView.setBackground(makeButtonBackground(
+                Color.rgb(31, 40, 55),
+                Color.rgb(104, 133, 168)));
+        parameterView.setOnTouchListener((view, event) -> handleDrag(event));
+
+        TextView parameterTitle = new TextView(context);
+        parameterTitle.setText("\u8bc6\u522b\u53c2\u6570");
+        parameterTitle.setTextColor(Color.rgb(151, 210, 255));
+        parameterTitle.setTextSize(12f);
+        parameterTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        parameterView.addView(parameterTitle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
         statusView = new TextView(context);
         statusView.setText(statusText);
@@ -291,9 +408,16 @@ public final class StatusOverlay {
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         statusParams.setMargins(0, dp(4), 0, dp(8));
         parameterView.addView(statusView, statusParams);
-        contentView.addView(parameterView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        ScrollView buttonScrollView = new ScrollView(context);
+        buttonScrollView.setFillViewport(false);
+        buttonScrollView.setVerticalScrollBarEnabled(true);
+        buttonScrollView.setClipToPadding(false);
+        LinearLayout buttonList = new LinearLayout(context);
+        buttonList.setOrientation(LinearLayout.VERTICAL);
+        buttonScrollView.addView(buttonList, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT));
 
         LinearLayout firstRow = makeButtonRow();
 
@@ -310,7 +434,7 @@ public final class StatusOverlay {
         firstRow.addView(autoSoloButton, makeGridButtonParams(false));
         setAutoSoloMode(autoSoloMode);
 
-        contentView.addView(firstRow, new LinearLayout.LayoutParams(
+        buttonList.addView(firstRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
@@ -329,7 +453,7 @@ public final class StatusOverlay {
         debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
         secondRow.addView(debugDisplayButton, makeGridButtonParams(false));
 
-        contentView.addView(secondRow, new LinearLayout.LayoutParams(
+        buttonList.addView(secondRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
@@ -338,21 +462,228 @@ public final class StatusOverlay {
         resetStateButton.setOnClickListener(v -> onResetStateClick.run());
         thirdRow.addView(resetStateButton, makeGridButtonParams(true));
 
-        logicProfileButton = makeSmallButton("\u6362\u8c31");
+        logicProfileButton = makeSmallButton("\u5e94\u7528\u8c31\u9762");
         logicProfileButton.setOnClickListener(v -> onLogicProfileClick.run());
         thirdRow.addView(logicProfileButton, makeGridButtonParams(true));
 
         Button stop = makeSmallButton("\u505c\u6b62");
         stop.setOnClickListener(v -> onStopClick.run());
         thirdRow.addView(stop, makeGridButtonParams(false));
-        contentView.addView(thirdRow, new LinearLayout.LayoutParams(
+
+        buttonList.addView(thirdRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView chartLabel = new TextView(context);
+        chartLabel.setText("\u5e8f\u53f7 / \u96be\u5ea6");
+        chartLabel.setTextColor(Color.rgb(188, 203, 222));
+        chartLabel.setTextSize(10f);
+        LinearLayout.LayoutParams chartLabelParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        chartLabelParams.setMargins(0, dp(7), 0, dp(1));
+        buttonList.addView(chartLabel, chartLabelParams);
+
+        LinearLayout chartRow = makeButtonRow();
+        logicSongSelector = new Spinner(context);
+        logicSongAdapter = makeLogicSelectorAdapter();
+        logicSongSelector.setAdapter(logicSongAdapter);
+        styleLogicSelector(logicSongSelector);
+        logicSongSelector.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                       int position, long id) {
+                if (updatingLogicChartSelectors || position < 0 || position >= logicSongIds.size()) {
+                    return;
+                }
+                refreshLogicDifficultySelector(logicSongIds.get(position), true);
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {
+            }
+        });
+        chartRow.addView(logicSongSelector, makeChartSelectorParams(true));
+
+        logicDifficultySelector = new Spinner(context);
+        logicDifficultyAdapter = makeLogicSelectorAdapter();
+        logicDifficultySelector.setAdapter(logicDifficultyAdapter);
+        styleLogicSelector(logicDifficultySelector);
+        logicDifficultySelector.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                       int position, long id) {
+                if (updatingLogicChartSelectors || position < 0 || position >= logicDifficulties.size()) {
+                    return;
+                }
+                String songId = selectedLogicSongId();
+                String difficulty = logicDifficulties.get(position);
+                if (AppSettings.selectLogicChart(context, songId, difficulty)) {
+                    updateSelectedChartButton();
+                }
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {
+            }
+        });
+        chartRow.addView(logicDifficultySelector, makeChartSelectorParams(false));
+        buttonList.addView(chartRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout fourthRow = makeButtonRow();
+        screenRecordButton = makeSmallButton("录屏");
+        screenRecordButton.setOnClickListener(v -> onScreenRecordClick.run());
+        LinearLayout.LayoutParams recordParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(36));
+        recordParams.setMargins(0, dp(6), 0, 0);
+        fourthRow.addView(screenRecordButton, recordParams);
+        buttonList.addView(fourthRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout fifthRow = makeButtonRow();
+        customButton = makeSmallButton("\u81ea\u5b9a\u4e49");
+        customButton.setVisibility(View.GONE);
+        customButton.setOnClickListener(v -> onCustomClick.run());
+        LinearLayout.LayoutParams customParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(36));
+        customParams.setMargins(0, dp(6), 0, 0);
+        fifthRow.addView(customButton, customParams);
+        buttonList.addView(fifthRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        contentView.addView(buttonScrollView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(CONTROL_AREA_HEIGHT_DP)));
         root.addView(contentView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        refreshLogicChartSelectors();
         return root;
+    }
+
+    private void refreshLogicChartSelectors() {
+        if (logicSongAdapter == null || logicDifficultyAdapter == null) {
+            return;
+        }
+        updatingLogicChartSelectors = true;
+        logicSongIds.clear();
+        logicSongIds.addAll(AppSettings.logicChartSongIds(context));
+        logicSongAdapter.clear();
+        for (String songId : logicSongIds) {
+            logicSongAdapter.add(songId);
+        }
+        logicSongAdapter.notifyDataSetChanged();
+
+        if (logicSongIds.isEmpty()) {
+            logicDifficulties.clear();
+            logicDifficultyAdapter.clear();
+            logicDifficultyAdapter.notifyDataSetChanged();
+            updatingLogicChartSelectors = false;
+            updateSelectedChartButton();
+            return;
+        }
+        String selectedSong = AppSettings.selectedLogicChartSongId(context);
+        int songIndex = logicSongIds.indexOf(selectedSong);
+        if (songIndex < 0) {
+            songIndex = 0;
+        }
+        logicSongSelector.setSelection(songIndex, false);
+        refreshLogicDifficultySelector(logicSongIds.get(songIndex), false);
+        updatingLogicChartSelectors = false;
+        updateSelectedChartButton();
+    }
+
+    private void refreshLogicDifficultySelector(String songId, boolean selectDefault) {
+        if (logicDifficultyAdapter == null) {
+            return;
+        }
+        boolean wasUpdating = updatingLogicChartSelectors;
+        updatingLogicChartSelectors = true;
+        logicDifficulties.clear();
+        logicDifficulties.addAll(AppSettings.logicChartDifficulties(context, songId));
+        logicDifficultyAdapter.clear();
+        for (String difficulty : logicDifficulties) {
+            logicDifficultyAdapter.add(difficulty.toUpperCase(Locale.ROOT));
+        }
+        logicDifficultyAdapter.notifyDataSetChanged();
+        int difficultyIndex = logicDifficulties.indexOf(AppSettings.selectedLogicChartDifficulty(context));
+        if (difficultyIndex < 0) {
+            difficultyIndex = 0;
+        }
+        if (!logicDifficulties.isEmpty()) {
+            logicDifficultySelector.setSelection(difficultyIndex, false);
+            if (selectDefault) {
+                AppSettings.selectLogicChart(context, songId, logicDifficulties.get(difficultyIndex));
+            }
+        }
+        updatingLogicChartSelectors = wasUpdating;
+        updateSelectedChartButton();
+    }
+
+    private String selectedLogicSongId() {
+        int position = logicSongSelector == null ? -1 : logicSongSelector.getSelectedItemPosition();
+        return position >= 0 && position < logicSongIds.size()
+                ? logicSongIds.get(position)
+                : AppSettings.selectedLogicChartSongId(context);
+    }
+
+    private void updateSelectedChartButton() {
+        if (logicProfileButton == null) {
+            return;
+        }
+        String songId = AppSettings.selectedLogicChartSongId(context);
+        String difficulty = AppSettings.selectedLogicChartDifficulty(context);
+        logicProfileButton.setText(songId.isEmpty() || difficulty.isEmpty()
+                ? "\u5e94\u7528\u8c31\u9762"
+                : "\u5e94\u7528 " + songId + " " + difficulty.toUpperCase(Locale.ROOT));
+    }
+
+    private LinearLayout.LayoutParams makeChartSelectorParams(boolean hasRightMargin) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(36), 1f);
+        params.setMargins(0, 0, hasRightMargin ? dp(5) : 0, 0);
+        return params;
+    }
+
+    private ArrayAdapter<String> makeLogicSelectorAdapter() {
+        return new ArrayAdapter<String>(context, android.R.layout.simple_spinner_item, new ArrayList<>()) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                return makeSelectorText(getItem(position), false);
+            }
+
+            @Override
+            public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                return makeSelectorText(getItem(position), true);
+            }
+        };
+    }
+
+    private TextView makeSelectorText(String text, boolean dropdownItem) {
+        TextView view = new TextView(context);
+        view.setText(text == null ? "" : text);
+        view.setTextColor(COLOR_BUTTON_TEXT);
+        view.setTextSize(12f);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        view.setSingleLine(true);
+        view.setPadding(dp(10), 0, dp(8), 0);
+        if (dropdownItem) {
+            view.setMinHeight(dp(42));
+            view.setBackgroundColor(Color.rgb(35, 45, 62));
+        }
+        return view;
+    }
+
+    private void styleLogicSelector(Spinner selector) {
+        selector.setPadding(dp(1), 0, dp(1), 0);
+        selector.setBackground(makeButtonBackground(
+                Color.rgb(24, 33, 48),
+                Color.rgb(123, 163, 207)));
     }
 
     private Button makeSmallButton(String text) {
@@ -361,9 +692,11 @@ public final class StatusOverlay {
         button.setAllCaps(false);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
-        button.setTextSize(11f);
+        button.setTextSize(10.5f);
+        button.setTextColor(COLOR_BUTTON_TEXT);
         button.setSingleLine(false);
         button.setPadding(dp(3), 0, dp(3), 0);
+        button.setBackground(makeButtonBackground(COLOR_BUTTON, COLOR_BUTTON_BORDER));
         return button;
     }
 
@@ -382,22 +715,29 @@ public final class StatusOverlay {
 
     private void setParametersVisible(boolean visible) {
         parametersVisible = visible;
-        if (parameterView != null) {
-            parameterView.setVisibility(visible && !collapsed ? View.VISIBLE : View.GONE);
+        AppSettings.setOverlayParametersVisible(context, visible);
+        if (visible && !collapsed) {
+            showParameterWindow();
+        } else {
+            dismissParameterWindow();
         }
         if (detailsButton != null) {
             detailsButton.setText(visible ? "隐藏参数" : "显示参数");
         }
         updateLayout();
+        notifyPositionChanged();
     }
 
     private void setCollapsed(boolean collapsed) {
         this.collapsed = collapsed;
+        AppSettings.setOverlayCollapsed(context, collapsed);
         if (contentView != null) {
             contentView.setVisibility(collapsed ? View.GONE : View.VISIBLE);
         }
-        if (parameterView != null) {
-            parameterView.setVisibility(!collapsed && parametersVisible ? View.VISIBLE : View.GONE);
+        if (!collapsed && parametersVisible) {
+            showParameterWindow();
+        } else {
+            dismissParameterWindow();
         }
         if (collapseButton != null) {
             collapseButton.setText(collapsed ? "展开" : "折叠");
@@ -410,6 +750,7 @@ public final class StatusOverlay {
                     collapsed ? dp(6) : dp(8));
         }
         updateLayout();
+        notifyPositionChanged();
     }
 
     private void updateClickModeColor() {
@@ -471,6 +812,55 @@ public final class StatusOverlay {
             } catch (IllegalArgumentException ignored) {
             }
         }
+        updateParameterWindowPosition();
+    }
+
+    private void showParameterWindow() {
+        if (windowManager == null || rootView == null || parameterView == null
+                || parameterWindowParams != null || collapsed || !parametersVisible) {
+            return;
+        }
+        WindowManager.LayoutParams sideParams = new WindowManager.LayoutParams(
+                dp(PARAMETER_PANEL_WIDTH_DP),
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                Build.VERSION.SDK_INT >= 26
+                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT);
+        sideParams.gravity = Gravity.START | Gravity.TOP;
+        sideParams.x = params.x + overlayWidthPx() + dp(PARAMETER_PANEL_GAP_DP);
+        sideParams.y = params.y;
+        try {
+            windowManager.addView(parameterView, sideParams);
+            parameterWindowParams = sideParams;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "failed to show parameter window", e);
+        }
+    }
+
+    private void dismissParameterWindow() {
+        if (windowManager == null || parameterView == null || parameterWindowParams == null) {
+            parameterWindowParams = null;
+            return;
+        }
+        try {
+            windowManager.removeView(parameterView);
+        } catch (IllegalArgumentException ignored) {
+        }
+        parameterWindowParams = null;
+    }
+
+    private void updateParameterWindowPosition() {
+        if (windowManager == null || parameterView == null || parameterWindowParams == null || params == null) {
+            return;
+        }
+        try {
+            parameterWindowParams.x = params.x + overlayWidthPx() + dp(PARAMETER_PANEL_GAP_DP);
+            parameterWindowParams.y = params.y;
+            windowManager.updateViewLayout(parameterView, parameterWindowParams);
+        } catch (IllegalArgumentException ignored) {
+        }
     }
 
     private boolean handleDrag(MotionEvent event) {
@@ -490,6 +880,7 @@ public final class StatusOverlay {
                 params.x = startX + Math.round(event.getRawX() - downRawX);
                 params.y = startY + Math.round(event.getRawY() - downRawY);
                 updateLayout();
+                notifyPositionChanged();
                 return true;
 
             default:
@@ -505,6 +896,7 @@ public final class StatusOverlay {
         autoContinueStatusView = null;
         statusView = null;
         collapseButton = null;
+        hideButton = null;
         detailsButton = null;
         previewButton = null;
         noClickButton = null;
@@ -512,18 +904,42 @@ public final class StatusOverlay {
         logicPlayButton = null;
         logicProfileButton = null;
         resetStateButton = null;
+        screenRecordButton = null;
+        customButton = null;
         debugDisplayButton = null;
+        logicSongSelector = null;
+        logicDifficultySelector = null;
+        logicSongAdapter = null;
+        logicDifficultyAdapter = null;
+        logicSongIds.clear();
+        logicDifficulties.clear();
+        updatingLogicChartSelectors = false;
         params = null;
+        parameterWindowParams = null;
         parametersVisible = false;
         collapsed = false;
         autoContinueStatus = AutoContinueController.STATUS_PLAYING;
     }
 
+    private void notifyPositionChanged() {
+        if (onOverlayPositionChanged != null) {
+            onOverlayPositionChanged.run();
+        }
+    }
+
     private GradientDrawable makeBackground() {
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.argb(222, 24, 28, 36));
-        drawable.setCornerRadius(dp(8));
-        drawable.setStroke(dp(1), Color.argb(120, 255, 255, 255));
+        drawable.setColor(Color.argb(238, 22, 28, 39));
+        drawable.setCornerRadius(dp(10));
+        drawable.setStroke(dp(1), Color.argb(145, 164, 183, 211));
+        return drawable;
+    }
+
+    private GradientDrawable makeButtonBackground(int color, int borderColor) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(7));
+        drawable.setStroke(dp(1), borderColor);
         return drawable;
     }
 

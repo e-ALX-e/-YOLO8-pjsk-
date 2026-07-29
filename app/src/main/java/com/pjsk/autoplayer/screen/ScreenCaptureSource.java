@@ -57,6 +57,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
     private int width;
     private int height;
     private int densityDpi;
+    private boolean frameDeliveryPaused;
     private boolean closed;
 
     public ScreenCaptureSource(Context context, MediaProjection mediaProjection, Listener listener) {
@@ -85,8 +86,50 @@ public final class ScreenCaptureSource implements AutoCloseable {
         };
         mediaProjection.registerCallback(projectionCallback, handler);
 
+        createCapturePipeline();
+    }
+
+    /**
+     * Pauses delivery without recreating the virtual display. Keeping the projection token and
+     * surface intact is required on Android 14, while leaving ImageReader buffers full prevents
+     * needless bitmap copies during clock-driven logic playback.
+     */
+    public void setFrameDeliveryPaused(boolean paused) {
+        Handler currentHandler = handler;
+        if (currentHandler == null) {
+            return;
+        }
+        currentHandler.post(() -> {
+            if (closed || frameDeliveryPaused == paused) {
+                return;
+            }
+            frameDeliveryPaused = paused;
+            if (!paused) {
+                discardQueuedImages();
+            }
+        });
+    }
+
+    private void createCapturePipeline() {
+        Surface surface = createImageReader();
+        requestHighFrameRate(surface);
+        virtualDisplay = mediaProjection.createVirtualDisplay(
+                "pjsk-capture",
+                width,
+                height,
+                densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                surface,
+                null,
+                null);
+    }
+
+    private Surface createImageReader() {
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
         imageReader.setOnImageAvailableListener(reader -> {
+            if (frameDeliveryPaused) {
+                return;
+            }
             Image image = reader.acquireLatestImage();
             if (image == null) {
                 return;
@@ -110,18 +153,35 @@ public final class ScreenCaptureSource implements AutoCloseable {
                 image.close();
             }
         }, handler);
+        return imageReader.getSurface();
+    }
 
-        Surface surface = imageReader.getSurface();
-        requestHighFrameRate(surface);
-        virtualDisplay = mediaProjection.createVirtualDisplay(
-                "pjsk-capture",
-                width,
-                height,
-                densityDpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                surface,
-                null,
-                null);
+    private void discardQueuedImages() {
+        if (imageReader == null) {
+            return;
+        }
+        while (true) {
+            Image image = imageReader.acquireLatestImage();
+            if (image == null) {
+                return;
+            }
+            image.close();
+        }
+    }
+
+    private void releaseCapturePipeline() {
+        if (virtualDisplay != null) {
+            virtualDisplay.release();
+            virtualDisplay = null;
+        }
+        releaseImageReader();
+    }
+
+    private void releaseImageReader() {
+        if (imageReader != null) {
+            imageReader.close();
+            imageReader = null;
+        }
     }
 
     /**
@@ -294,14 +354,7 @@ public final class ScreenCaptureSource implements AutoCloseable {
             return;
         }
         closed = true;
-        if (virtualDisplay != null) {
-            virtualDisplay.release();
-            virtualDisplay = null;
-        }
-        if (imageReader != null) {
-            imageReader.close();
-            imageReader = null;
-        }
+        releaseCapturePipeline();
         if (projectionCallback != null) {
             try {
                 mediaProjection.unregisterCallback(projectionCallback);

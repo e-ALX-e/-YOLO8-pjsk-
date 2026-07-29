@@ -48,6 +48,8 @@ public final class DetectionPreviewOverlay {
     private Button calibrationLockButton;
     private long lastPreviewMs;
     private boolean calibrationLocked = true;
+    private int anchorX;
+    private int anchorY;
 
     private int startX;
     private int startY;
@@ -57,6 +59,8 @@ public final class DetectionPreviewOverlay {
     public DetectionPreviewOverlay(Context context, Runnable onCloseClick) {
         this.context = context.getApplicationContext();
         this.onCloseClick = onCloseClick;
+        anchorX = dp(268);
+        anchorY = 0;
     }
 
     public boolean isShown() {
@@ -65,6 +69,23 @@ public final class DetectionPreviewOverlay {
 
     public void show() {
         mainHandler.post(this::showOnMain);
+    }
+
+    /** Places this independent preview window beside the control overlay. */
+    public void setAnchorPosition(int x, int y) {
+        mainHandler.post(() -> {
+            anchorX = Math.max(0, x);
+            anchorY = Math.max(0, y);
+            if (windowManager == null || rootView == null || params == null) {
+                return;
+            }
+            try {
+                params.x = anchorX;
+                params.y = anchorY;
+                windowManager.updateViewLayout(rootView, params);
+            } catch (IllegalArgumentException ignored) {
+            }
+        });
     }
 
     public void dismiss() {
@@ -181,8 +202,8 @@ public final class DetectionPreviewOverlay {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.START | Gravity.TOP;
-        params.x = dp(16);
-        params.y = dp(260);
+        params.x = anchorX;
+        params.y = anchorY;
 
         try {
             windowManager.addView(rootView, params);
