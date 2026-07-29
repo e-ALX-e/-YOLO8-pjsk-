@@ -1304,7 +1304,7 @@ public final class MainActivity extends Activity {
         View thumb = new View(this);
         FrameLayout.LayoutParams thumbParams = new FrameLayout.LayoutParams(dp(20), dp(20));
         thumbParams.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
-        thumbParams.leftMargin = dp(3);
+        thumbParams.leftMargin = dp(8);
         thumb.setLayoutParams(thumbParams);
         thumb.setBackground(makeOvalBackground(Color.WHITE, COLOR_BORDER));
         toggle.addView(thumb);
@@ -1404,8 +1404,8 @@ public final class MainActivity extends Activity {
                 16));
         FrameLayout.LayoutParams thumbParams = (FrameLayout.LayoutParams) control.thumb.getLayoutParams();
         thumbParams.gravity = (checked ? Gravity.END : Gravity.START) | Gravity.CENTER_VERTICAL;
-        thumbParams.leftMargin = checked ? 0 : dp(3);
-        thumbParams.rightMargin = checked ? dp(3) : 0;
+        thumbParams.leftMargin = checked ? 0 : dp(8);
+        thumbParams.rightMargin = checked ? dp(8) : 0;
         control.thumb.setLayoutParams(thumbParams);
     }
 
