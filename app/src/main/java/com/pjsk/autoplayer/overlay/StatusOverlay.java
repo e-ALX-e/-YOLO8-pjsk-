@@ -336,11 +336,12 @@ public final class StatusOverlay {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(10), dp(8), dp(10), dp(8));
         root.setBackground(makeBackground());
-        root.setOnTouchListener((view, event) -> handleDrag(event));
 
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+        // Keep dragging on the header so the control list can receive scroll gestures.
+        header.setOnTouchListener((view, event) -> handleDrag(event));
 
         statusTitleView = new TextView(context);
         statusTitleView.setText("状态");
