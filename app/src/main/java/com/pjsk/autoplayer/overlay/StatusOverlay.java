@@ -76,6 +76,8 @@ public final class StatusOverlay {
     private Button screenRecordButton;
     private Button customButton;
     private Button debugDisplayButton;
+    private TextView calibrationStatusView;
+    private Button calibrationLockButton;
     private Spinner logicSongSelector;
     private Spinner logicDifficultySelector;
     private ArrayAdapter<String> logicSongAdapter;
@@ -555,6 +557,53 @@ public final class StatusOverlay {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        LinearLayout calibrationInfoRow = makeButtonRow();
+        calibrationStatusView = new TextView(context);
+        calibrationStatusView.setTextColor(Color.rgb(225, 232, 240));
+        calibrationStatusView.setTextSize(10.5f);
+        calibrationStatusView.setGravity(Gravity.CENTER_VERTICAL);
+        calibrationInfoRow.addView(calibrationStatusView, new LinearLayout.LayoutParams(
+                0, dp(30), 1f));
+
+        calibrationLockButton = makeSmallButton("");
+        calibrationLockButton.setOnClickListener(v -> {
+            AppSettings.setActionYCalibrationLocked(
+                    context,
+                    !AppSettings.isActionYCalibrationLocked(context));
+            refreshActionYCalibrationControls();
+        });
+        LinearLayout.LayoutParams calibrationLockParams = new LinearLayout.LayoutParams(dp(94), dp(30));
+        calibrationLockParams.setMargins(dp(6), 0, 0, 0);
+        calibrationInfoRow.addView(calibrationLockButton, calibrationLockParams);
+        LinearLayout.LayoutParams calibrationInfoParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        calibrationInfoParams.setMargins(0, dp(6), 0, 0);
+        buttonList.addView(calibrationInfoRow, calibrationInfoParams);
+
+        LinearLayout calibrationActionRow = makeButtonRow();
+        Button calibrationUp = makeSmallButton("\u4e0a\u79fb");
+        calibrationUp.setOnClickListener(v -> adjustActionY(-1.0));
+        calibrationActionRow.addView(calibrationUp, makeGridButtonParams(true));
+
+        Button calibrationReset = makeSmallButton("\u91cd\u7f6e");
+        calibrationReset.setOnClickListener(v -> {
+            if (AppSettings.isActionYCalibrationLocked(context)) {
+                return;
+            }
+            AppSettings.resetActionY(context);
+            refreshActionYCalibrationControls();
+        });
+        calibrationActionRow.addView(calibrationReset, makeGridButtonParams(true));
+
+        Button calibrationDown = makeSmallButton("\u4e0b\u79fb");
+        calibrationDown.setOnClickListener(v -> adjustActionY(1.0));
+        calibrationActionRow.addView(calibrationDown, makeGridButtonParams(false));
+        buttonList.addView(calibrationActionRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        refreshActionYCalibrationControls();
+
         contentView.addView(buttonScrollView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(CONTROL_AREA_HEIGHT_DP)));
@@ -888,6 +937,32 @@ public final class StatusOverlay {
         }
     }
 
+    private void adjustActionY(double delta) {
+        if (AppSettings.isActionYCalibrationLocked(context)) {
+            return;
+        }
+        AppSettings.setActionY(context, AppSettings.getActionY(context) + delta);
+        refreshActionYCalibrationControls();
+    }
+
+    private void refreshActionYCalibrationControls() {
+        if (calibrationStatusView != null) {
+            calibrationStatusView.setText(String.format(
+                    Locale.US,
+                    "\u5224\u5b9a\u70b9 %.0f",
+                    AppSettings.getActionY(context)));
+        }
+        if (calibrationLockButton != null) {
+            boolean locked = AppSettings.isActionYCalibrationLocked(context);
+            calibrationLockButton.setText(locked
+                    ? "\u89e3\u9501\u5224\u5b9a\u7ebf"
+                    : "\u9501\u5b9a\u5224\u5b9a\u7ebf");
+            calibrationLockButton.setTextColor(locked
+                    ? Color.rgb(255, 194, 87)
+                    : Color.rgb(94, 232, 142));
+        }
+    }
+
     private void clearViews() {
         rootView = null;
         contentView = null;
@@ -907,6 +982,8 @@ public final class StatusOverlay {
         screenRecordButton = null;
         customButton = null;
         debugDisplayButton = null;
+        calibrationStatusView = null;
+        calibrationLockButton = null;
         logicSongSelector = null;
         logicDifficultySelector = null;
         logicSongAdapter = null;

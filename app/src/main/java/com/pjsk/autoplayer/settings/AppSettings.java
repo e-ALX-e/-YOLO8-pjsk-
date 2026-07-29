@@ -33,6 +33,7 @@ public final class AppSettings {
     private static final String KEY_SELECTED_LOGIC_CHART_DIFFICULTY = "selected_logic_chart_difficulty";
     private static final String KEY_DEBUG_DISPLAY_ENABLED = "debug_display_enabled";
     private static final String KEY_ACTION_Y = "action_y";
+    private static final String KEY_ACTION_Y_CALIBRATION_LOCKED = "action_y_calibration_locked";
     private static final String KEY_TOUCH_MAPPING_MODE = "touch_mapping_mode";
     private static final String KEY_NOTE_MODEL_MODE = "note_model_mode";
     private static final String KEY_OVERLAY_CUSTOM_ACTION = "overlay_custom_action";
@@ -372,6 +373,14 @@ public final class AppSettings {
 
     public static void resetActionY(Context context) {
         setActionY(context, Config.ACTION_Y_DEFAULT);
+    }
+
+    public static boolean isActionYCalibrationLocked(Context context) {
+        return prefs(context).getBoolean(KEY_ACTION_Y_CALIBRATION_LOCKED, true);
+    }
+
+    public static void setActionYCalibrationLocked(Context context, boolean locked) {
+        prefs(context).edit().putBoolean(KEY_ACTION_Y_CALIBRATION_LOCKED, locked).apply();
     }
 
     public static double clampActionY(double value) {

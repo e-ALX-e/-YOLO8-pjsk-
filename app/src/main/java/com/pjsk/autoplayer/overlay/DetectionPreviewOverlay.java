@@ -51,10 +51,7 @@ public final class DetectionPreviewOverlay {
     private WindowManager.LayoutParams params;
     private LinearLayout rootView;
     private PreviewView previewView;
-    private TextView calibrationView;
-    private Button calibrationLockButton;
     private long lastPreviewMs;
-    private boolean calibrationLocked = true;
     private int anchorX;
     private int anchorY;
 
@@ -109,8 +106,6 @@ public final class DetectionPreviewOverlay {
             }
             rootView = null;
             previewView = null;
-            calibrationView = null;
-            calibrationLockButton = null;
             params = null;
         });
     }
@@ -177,7 +172,6 @@ public final class DetectionPreviewOverlay {
                         actionYBase,
                         stats,
                         buttonLabels);
-                updateCalibrationView();
             } else {
                 previewBitmap.recycle();
             }
@@ -218,8 +212,6 @@ public final class DetectionPreviewOverlay {
             Log.e(TAG, "failed to show preview overlay", e);
             rootView = null;
             previewView = null;
-            calibrationView = null;
-            calibrationLockButton = null;
             params = null;
         }
     }
@@ -262,136 +254,22 @@ public final class DetectionPreviewOverlay {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         previewView = new PreviewView(context, this::setActionYFromPreview);
-        previewView.setCalibrationLocked(calibrationLocked);
         LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
                 dp(PREVIEW_WIDTH_DP),
                 dp(PREVIEW_HEIGHT_DP));
         previewParams.setMargins(0, dp(6), 0, 0);
         root.addView(previewView, previewParams);
 
-        root.addView(buildCalibrationControls(), new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        updateCalibrationView();
-
         return root;
     }
 
-    private LinearLayout buildCalibrationControls() {
-        LinearLayout wrapper = new LinearLayout(context);
-        wrapper.setOrientation(LinearLayout.VERTICAL);
-        wrapper.setPadding(0, dp(5), 0, 0);
-
-        LinearLayout infoRow = new LinearLayout(context);
-        infoRow.setOrientation(LinearLayout.HORIZONTAL);
-        infoRow.setGravity(Gravity.CENTER_VERTICAL);
-
-        calibrationView = new TextView(context);
-        calibrationView.setTextColor(Color.rgb(225, 232, 240));
-        calibrationView.setTextSize(11f);
-        calibrationView.setGravity(Gravity.CENTER_VERTICAL);
-        infoRow.addView(calibrationView, new LinearLayout.LayoutParams(
-                0,
-                dp(30),
-                1f));
-
-        calibrationLockButton = makeCalibrationButton("");
-        calibrationLockButton.setOnClickListener(v -> setCalibrationLocked(!calibrationLocked));
-        LinearLayout.LayoutParams lockParams = new LinearLayout.LayoutParams(
-                dp(94),
-                dp(30));
-        lockParams.setMargins(dp(6), 0, 0, 0);
-        infoRow.addView(calibrationLockButton, lockParams);
-        wrapper.addView(infoRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        updateCalibrationLockButton();
-
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER);
-
-        Button up = makeCalibrationButton("上移");
-        up.setOnClickListener(v -> adjustActionY(-2.0));
-        row.addView(up, new LinearLayout.LayoutParams(0, dp(30), 1f));
-
-        Button reset = makeCalibrationButton("重置");
-        reset.setOnClickListener(v -> {
-            AppSettings.resetActionY(context);
-            refreshActionY();
-        });
-        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(0, dp(30), 1f);
-        resetParams.setMargins(dp(5), 0, dp(5), 0);
-        row.addView(reset, resetParams);
-
-        Button down = makeCalibrationButton("下移");
-        down.setOnClickListener(v -> adjustActionY(2.0));
-        row.addView(down, new LinearLayout.LayoutParams(0, dp(30), 1f));
-
-        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        rowParams.setMargins(0, dp(5), 0, 0);
-        wrapper.addView(row, rowParams);
-        return wrapper;
-    }
-
-    private Button makeCalibrationButton(String text) {
-        Button button = new Button(context);
-        button.setText(text);
-        button.setTextSize(12f);
-        button.setAllCaps(false);
-        button.setMinHeight(0);
-        button.setMinimumHeight(0);
-        button.setTextColor(COLOR_BUTTON_TEXT);
-        button.setPadding(dp(3), 0, dp(3), 0);
-        button.setBackground(makeButtonBackground(COLOR_BUTTON, COLOR_BUTTON_BORDER));
-        return button;
-    }
-
-    private void adjustActionY(double delta) {
-        if (calibrationLocked) {
-            return;
-        }
-        AppSettings.setActionY(context, AppSettings.getActionY(context) + delta);
-        refreshActionY();
-    }
-
     private void setActionYFromPreview(double actionYBase) {
-        if (calibrationLocked) {
+        if (AppSettings.isActionYCalibrationLocked(context)) {
             return;
         }
         AppSettings.setActionY(context, actionYBase);
-        refreshActionY();
-    }
-
-    private void refreshActionY() {
         if (previewView != null) {
             previewView.setActionYBase(AppSettings.getActionY(context));
-        }
-        updateCalibrationView();
-    }
-
-    private void updateCalibrationView() {
-        if (calibrationView != null) {
-            calibrationView.setText(String.format(
-                    Locale.US,
-                    "判定点 %.0f",
-                    AppSettings.getActionY(context)));
-        }
-    }
-
-    private void setCalibrationLocked(boolean locked) {
-        calibrationLocked = locked;
-        if (previewView != null) {
-            previewView.setCalibrationLocked(locked);
-        }
-        updateCalibrationLockButton();
-    }
-
-    private void updateCalibrationLockButton() {
-        if (calibrationLockButton != null) {
-            calibrationLockButton.setText(calibrationLocked ? "解锁判定线" : "锁定判定线");
         }
     }
 
@@ -515,7 +393,6 @@ public final class DetectionPreviewOverlay {
         private double actionYBase = Config.ACTION_Y_DEFAULT;
         private String stats = "waiting";
         private boolean buttonLabels;
-        private boolean calibrationLocked = true;
         private final CalibrationListener calibrationListener;
 
         PreviewView(Context context, CalibrationListener calibrationListener) {
@@ -562,11 +439,6 @@ public final class DetectionPreviewOverlay {
 
         void setActionYBase(double actionYBase) {
             this.actionYBase = AppSettings.clampActionY(actionYBase);
-            invalidate();
-        }
-
-        void setCalibrationLocked(boolean calibrationLocked) {
-            this.calibrationLocked = calibrationLocked;
             invalidate();
         }
 
@@ -657,7 +529,7 @@ public final class DetectionPreviewOverlay {
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
-            if (calibrationLocked) {
+            if (AppSettings.isActionYCalibrationLocked(getContext())) {
                 return true;
             }
             if (event.getActionMasked() != MotionEvent.ACTION_DOWN
