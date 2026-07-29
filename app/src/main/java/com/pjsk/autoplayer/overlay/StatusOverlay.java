@@ -544,10 +544,7 @@ public final class StatusOverlay {
         LinearLayout fourthRow = makeButtonRow();
         screenRecordButton = makeSmallButton("录屏");
         screenRecordButton.setOnClickListener(v -> onScreenRecordClick.run());
-        LinearLayout.LayoutParams recordParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(36));
-        recordParams.setMargins(0, dp(6), 0, 0);
-        fourthRow.addView(screenRecordButton, recordParams);
+        fourthRow.addView(screenRecordButton, makeWideButtonParams());
         buttonList.addView(fourthRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -556,10 +553,7 @@ public final class StatusOverlay {
         customButton = makeSmallButton("\u81ea\u5b9a\u4e49");
         customButton.setVisibility(View.GONE);
         customButton.setOnClickListener(v -> onCustomClick.run());
-        LinearLayout.LayoutParams customParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(36));
-        customParams.setMargins(0, dp(6), 0, 0);
-        fifthRow.addView(customButton, customParams);
+        fifthRow.addView(customButton, makeWideButtonParams());
         buttonList.addView(fifthRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -772,6 +766,14 @@ public final class StatusOverlay {
     private LinearLayout.LayoutParams makeGridButtonParams(boolean hasRightMargin) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(GRID_BUTTON_HEIGHT_DP), 1f);
         params.setMargins(0, dp(GRID_BUTTON_GAP_DP), hasRightMargin ? dp(5) : 0, dp(2));
+        return params;
+    }
+
+    private LinearLayout.LayoutParams makeWideButtonParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(GRID_BUTTON_HEIGHT_DP));
+        params.setMargins(0, dp(GRID_BUTTON_GAP_DP), 0, dp(2));
         return params;
     }
 
