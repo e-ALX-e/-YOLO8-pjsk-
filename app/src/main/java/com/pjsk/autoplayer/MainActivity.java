@@ -1258,17 +1258,21 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), 0, dp(7), 0);
+        row.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 9));
 
         Button button = new Button(this);
         button.setText(label);
         button.setAllCaps(false);
+        button.setTag("inline-control");
+        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         button.setOnClickListener(v -> toggleOverlayRuntimeAction(action));
-        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        buttonParams.setMargins(0, dp(7), dp(6), 0);
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
         row.addView(button, buttonParams);
 
         Switch toggle = new Switch(this);
-        toggle.setTag("overlay-toggle");
+        toggle.setTag("inline-toggle");
         toggle.setText(switchLabel);
         toggle.setGravity(Gravity.CENTER);
         toggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
@@ -1276,10 +1280,13 @@ public final class MainActivity extends Activity {
                 toggleOverlayRuntimeAction(action);
             }
         });
-        LinearLayout.LayoutParams toggleParams = new LinearLayout.LayoutParams(dp(98), dp(46));
-        toggleParams.setMargins(0, dp(7), 0, 0);
+        LinearLayout.LayoutParams toggleParams = new LinearLayout.LayoutParams(
+                dp(94), LinearLayout.LayoutParams.MATCH_PARENT);
         row.addView(toggle, toggleParams);
-        root.addView(row, matchWrap());
+        LinearLayout.LayoutParams rowParams = matchWrap();
+        rowParams.height = dp(44);
+        rowParams.setMargins(0, dp(6), 0, 0);
+        root.addView(row, rowParams);
         return toggle;
     }
 
@@ -1291,26 +1298,32 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), 0, dp(14), 0);
+        row.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 9));
 
         Button button = new Button(this);
         button.setText(label);
         button.setAllCaps(false);
+        button.setTag("inline-control");
+        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         button.setOnClickListener(v -> toggleOverlayRuntimeAction(action));
-        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        buttonParams.setMargins(0, dp(7), dp(6), 0);
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
         row.addView(button, buttonParams);
 
         TextView actionView = new TextView(this);
         actionView.setText(actionLabel);
-        actionView.setTextColor(COLOR_MUTED);
+        actionView.setTextColor(COLOR_PRIMARY);
         actionView.setTextSize(12f);
+        actionView.setTypeface(Typeface.DEFAULT_BOLD);
         actionView.setGravity(Gravity.CENTER);
-        actionView.setBackground(makeRoundedBackground(
-                Color.rgb(246, 250, 252), COLOR_BORDER, 8));
-        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(dp(98), dp(46));
-        actionParams.setMargins(0, dp(7), 0, 0);
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(
+                dp(94), LinearLayout.LayoutParams.MATCH_PARENT);
         row.addView(actionView, actionParams);
-        root.addView(row, matchWrap());
+        LinearLayout.LayoutParams rowParams = matchWrap();
+        rowParams.height = dp(44);
+        rowParams.setMargins(0, dp(6), 0, 0);
+        root.addView(row, rowParams);
     }
 
     private void toggleOverlayRuntimeAction(String action) {
@@ -1457,7 +1470,7 @@ public final class MainActivity extends Activity {
             styleButton((Button) view);
         } else if (view instanceof Switch) {
             Switch control = (Switch) view;
-            if ("overlay-toggle".equals(control.getTag())) {
+            if ("inline-toggle".equals(control.getTag())) {
                 control.setTextColor(COLOR_MUTED);
                 control.setTextSize(11f);
                 control.setMinHeight(0);
@@ -1540,6 +1553,15 @@ public final class MainActivity extends Activity {
     private void styleButton(Button button) {
         Object tag = button.getTag();
         String variant = tag instanceof String ? (String) tag : "default";
+        if ("inline-control".equals(variant)) {
+            button.setTextColor(COLOR_TEXT);
+            button.setTextSize(14f);
+            button.setMinHeight(0);
+            button.setMinimumHeight(0);
+            button.setPadding(0, 0, 0, 0);
+            button.setBackgroundColor(Color.TRANSPARENT);
+            return;
+        }
         int fill = COLOR_SURFACE;
         int border = COLOR_BORDER;
         int text = COLOR_TEXT;
