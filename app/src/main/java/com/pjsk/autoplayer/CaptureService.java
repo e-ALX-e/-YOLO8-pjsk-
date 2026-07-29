@@ -74,6 +74,7 @@ public final class CaptureService extends Service {
     private static final long LOGIC_TIMELINE_TICK_MS = 8;
 
     private static volatile boolean running;
+    private static volatile CaptureService activeService;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService startupWorker = Executors.newSingleThreadExecutor();
@@ -130,9 +131,15 @@ public final class CaptureService extends Service {
         return running;
     }
 
+    public static boolean isScreenRecording() {
+        CaptureService service = activeService;
+        return service != null && service.screenRecorder.isRecording();
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+        activeService = this;
         logicTimelineWorker.scheduleAtFixedRate(
                 this::advanceLogicTimeline,
                 0L,
@@ -1428,6 +1435,9 @@ public final class CaptureService extends Service {
 
     @Override
     public void onDestroy() {
+        if (activeService == this) {
+            activeService = null;
+        }
         stopEverything();
         logicTimelineWorker.shutdownNow();
         startupWorker.shutdownNow();

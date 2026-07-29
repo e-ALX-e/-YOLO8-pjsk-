@@ -64,9 +64,11 @@ public final class MainActivity extends Activity {
     private TextView touchMappingView;
     private TextView noteModelView;
     private TextView customOverlayActionView;
-    private TextView overlayRuntimeStateView;
-    private LinearLayout overlayRuntimePanel;
     private Switch overlayVisibilitySwitch;
+    private Switch overlayCollapseSwitch;
+    private Switch overlayParametersSwitch;
+    private Switch overlayDebugSwitch;
+    private Switch overlayRecordingSwitch;
     private SeekBar calibrationSeekBar;
     private Switch previewSwitch;
     private Switch noClickSwitch;
@@ -91,7 +93,7 @@ public final class MainActivity extends Activity {
     private final List<String> logicDifficulties = new ArrayList<>();
     private boolean updatingLogicChartSelectors;
     private boolean updatingCalibrationUi;
-    private boolean updatingOverlayVisibilitySwitch;
+    private boolean updatingOverlayRuntimeSwitches;
     private boolean captureRequestInFlight;
     private LinearLayout runPage;
     private LinearLayout logicPage;
@@ -1216,124 +1218,136 @@ public final class MainActivity extends Activity {
         titleParams.setMargins(0, dp(12), 0, dp(4));
         root.addView(title, titleParams);
 
-        LinearLayout runtimeRow = new LinearLayout(this);
-        runtimeRow.setOrientation(LinearLayout.HORIZONTAL);
-        runtimeRow.setGravity(Gravity.TOP);
-
-        LinearLayout commandColumn = new LinearLayout(this);
-        commandColumn.setOrientation(LinearLayout.VERTICAL);
-        addOverlayRuntimeButton(commandColumn, "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3",
+        overlayVisibilitySwitch = addOverlayRuntimeSwitchRow(
+                root,
+                "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3",
+                "\u663e\u793a",
                 CaptureService.ACTION_TOGGLE_OVERLAY_VISIBILITY);
-        addOverlayRuntimeButton(commandColumn, "\u6298\u53e0/\u5c55\u5f00\u5c0f\u7a97\u53e3",
+        overlayCollapseSwitch = addOverlayRuntimeSwitchRow(
+                root,
+                "\u6298\u53e0/\u5c55\u5f00\u5c0f\u7a97\u53e3",
+                "\u6298\u53e0",
                 CaptureService.ACTION_TOGGLE_OVERLAY_COLLAPSE);
-        addOverlayRuntimeButton(commandColumn, "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3\u53c2\u6570",
+        overlayParametersSwitch = addOverlayRuntimeSwitchRow(
+                root,
+                "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3\u53c2\u6570",
+                "\u53c2\u6570",
                 CaptureService.ACTION_TOGGLE_OVERLAY_PARAMETERS);
-        addOverlayRuntimeButton(commandColumn, "\u91cd\u7f6e\u8fd0\u884c\u72b6\u6001",
+        addOverlayRuntimeActionRow(root,
+                "\u91cd\u7f6e\u8fd0\u884c\u72b6\u6001",
+                "\u6267\u884c",
                 CaptureService.ACTION_RESET_PLAYBACK);
-        addOverlayRuntimeButton(commandColumn, "\u5f00\u5173\u8c03\u8bd5\u663e\u793a",
+        overlayDebugSwitch = addOverlayRuntimeSwitchRow(
+                root,
+                "\u5f00\u5173\u8c03\u8bd5\u663e\u793a",
+                "\u8c03\u8bd5",
                 CaptureService.ACTION_TOGGLE_DEBUG_DISPLAY);
-        addOverlayRuntimeButton(commandColumn, "\u5f00\u59cb/\u7ed3\u675f\u5f55\u5c4f",
+        overlayRecordingSwitch = addOverlayRuntimeSwitchRow(
+                root,
+                "\u5f00\u59cb/\u7ed3\u675f\u5f55\u5c4f",
+                "\u5f55\u5c4f",
                 CaptureService.ACTION_TOGGLE_SCREEN_RECORDING);
-        LinearLayout.LayoutParams commandParams = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        commandParams.setMargins(0, 0, dp(8), 0);
-        runtimeRow.addView(commandColumn, commandParams);
-
-        overlayRuntimePanel = new LinearLayout(this);
-        overlayRuntimePanel.setOrientation(LinearLayout.VERTICAL);
-        overlayRuntimePanel.setGravity(Gravity.CENTER_HORIZONTAL);
-        overlayRuntimePanel.setPadding(dp(8), dp(10), dp(8), dp(8));
-        overlayRuntimePanel.setMinimumHeight(dp(318));
-
-        TextView panelTitle = new TextView(this);
-        panelTitle.setText("\u5c0f\u7a97\u53e3\n\u72b6\u6001");
-        panelTitle.setTextColor(COLOR_MUTED);
-        panelTitle.setTextSize(11f);
-        panelTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        panelTitle.setGravity(Gravity.CENTER);
-        overlayRuntimePanel.addView(panelTitle, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        overlayRuntimeStateView = new TextView(this);
-        overlayRuntimeStateView.setTextSize(14f);
-        overlayRuntimeStateView.setTypeface(Typeface.DEFAULT_BOLD);
-        overlayRuntimeStateView.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams runtimeStateParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        runtimeStateParams.setMargins(0, dp(8), 0, dp(6));
-        overlayRuntimePanel.addView(overlayRuntimeStateView, runtimeStateParams);
-
-        overlayVisibilitySwitch = new Switch(this);
-        overlayVisibilitySwitch.setTag("overlay-toggle");
-        overlayVisibilitySwitch.setText("\u663e\u793a");
-        overlayVisibilitySwitch.setGravity(Gravity.CENTER);
-        overlayVisibilitySwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (updatingOverlayVisibilitySwitch) {
-                return;
-            }
-            if (!CaptureService.isRunning()) {
-                AppSettings.setOverlayHidden(this, !isChecked);
-                updateOverlayRuntimeStateUi();
-                return;
-            }
-            startService(new Intent(this, CaptureService.class)
-                    .setAction(CaptureService.ACTION_TOGGLE_OVERLAY_VISIBILITY));
-            overlayVisibilitySwitch.postDelayed(this::updateOverlayRuntimeStateUi, 180L);
-        });
-        overlayRuntimePanel.addView(overlayVisibilitySwitch, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
-
-        runtimeRow.addView(overlayRuntimePanel, new LinearLayout.LayoutParams(
-                dp(116), LinearLayout.LayoutParams.MATCH_PARENT));
-        root.addView(runtimeRow, matchWrap());
         updateOverlayRuntimeStateUi();
     }
 
-    private void addOverlayRuntimeButton(LinearLayout root, String label, String action) {
+    private Switch addOverlayRuntimeSwitchRow(
+            LinearLayout root,
+            String label,
+            String switchLabel,
+            String action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
         Button button = new Button(this);
         button.setText(label);
         button.setAllCaps(false);
-        button.setOnClickListener(v -> {
-            if (!CaptureService.isRunning()) {
-                applyOverlayStartupPreference(action);
-                updateOverlayRuntimeStateUi();
-                return;
+        button.setOnClickListener(v -> toggleOverlayRuntimeAction(action));
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        buttonParams.setMargins(0, dp(7), dp(6), 0);
+        row.addView(button, buttonParams);
+
+        Switch toggle = new Switch(this);
+        toggle.setTag("overlay-toggle");
+        toggle.setText(switchLabel);
+        toggle.setGravity(Gravity.CENTER);
+        toggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (!updatingOverlayRuntimeSwitches) {
+                toggleOverlayRuntimeAction(action);
             }
-            startService(new Intent(this, CaptureService.class).setAction(action));
-            button.postDelayed(this::updateOverlayRuntimeStateUi, 180L);
         });
-        root.addView(button, buttonParams());
+        LinearLayout.LayoutParams toggleParams = new LinearLayout.LayoutParams(dp(98), dp(46));
+        toggleParams.setMargins(0, dp(7), 0, 0);
+        row.addView(toggle, toggleParams);
+        root.addView(row, matchWrap());
+        return toggle;
+    }
+
+    private void addOverlayRuntimeActionRow(
+            LinearLayout root,
+            String label,
+            String actionLabel,
+            String action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button button = new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setOnClickListener(v -> toggleOverlayRuntimeAction(action));
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        buttonParams.setMargins(0, dp(7), dp(6), 0);
+        row.addView(button, buttonParams);
+
+        TextView actionView = new TextView(this);
+        actionView.setText(actionLabel);
+        actionView.setTextColor(COLOR_MUTED);
+        actionView.setTextSize(12f);
+        actionView.setGravity(Gravity.CENTER);
+        actionView.setBackground(makeRoundedBackground(
+                Color.rgb(246, 250, 252), COLOR_BORDER, 8));
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(dp(98), dp(46));
+        actionParams.setMargins(0, dp(7), 0, 0);
+        row.addView(actionView, actionParams);
+        root.addView(row, matchWrap());
+    }
+
+    private void toggleOverlayRuntimeAction(String action) {
+        if (!CaptureService.isRunning()) {
+            applyOverlayStartupPreference(action);
+            updateOverlayRuntimeStateUi();
+            return;
+        }
+        startService(new Intent(this, CaptureService.class).setAction(action));
+        runPage.postDelayed(this::updateOverlayRuntimeStateUi, 180L);
     }
 
     private void updateOverlayRuntimeStateUi() {
-        if (overlayRuntimeStateView == null) {
-            return;
-        }
         boolean hidden = AppSettings.isOverlayHidden(this);
         boolean collapsed = AppSettings.isOverlayCollapsed(this);
         boolean parametersVisible = AppSettings.isOverlayParametersVisible(this);
         boolean debugEnabled = AppSettings.isDebugDisplayEnabled(this);
-        String visibility = hidden ? "\u5df2\u9690\u85cf" : "\u5df2\u663e\u793a";
-        String shape = collapsed ? "\u5df2\u6298\u53e0" : "\u5df2\u5c55\u5f00";
-        overlayRuntimeStateView.setText(visibility
-                + "\n" + shape
-                + "\n\u53c2\u6570" + (parametersVisible ? "\u663e\u793a" : "\u9690\u85cf")
-                + "\n\u8c03\u8bd5" + (debugEnabled ? "\u5f00" : "\u5173"));
-        int accent = hidden
-                ? Color.rgb(190, 92, 70)
-                : collapsed ? Color.rgb(184, 126, 55) : Color.rgb(33, 133, 91);
-        overlayRuntimeStateView.setTextColor(accent);
-        if (overlayRuntimePanel != null) {
-            overlayRuntimePanel.setBackground(makeRoundedBackground(
-                    Color.rgb(246, 250, 252),
-                    accent,
-                    10));
+        updatingOverlayRuntimeSwitches = true;
+        setOverlayRuntimeSwitch(overlayVisibilitySwitch, !hidden, hidden
+                ? Color.rgb(190, 92, 70) : Color.rgb(33, 133, 91));
+        setOverlayRuntimeSwitch(overlayCollapseSwitch, collapsed, collapsed
+                ? Color.rgb(184, 126, 55) : COLOR_MUTED);
+        setOverlayRuntimeSwitch(overlayParametersSwitch, parametersVisible, parametersVisible
+                ? Color.rgb(33, 133, 91) : COLOR_MUTED);
+        setOverlayRuntimeSwitch(overlayDebugSwitch, debugEnabled, debugEnabled
+                ? Color.rgb(33, 133, 91) : COLOR_MUTED);
+        setOverlayRuntimeSwitch(overlayRecordingSwitch, CaptureService.isScreenRecording(),
+                CaptureService.isScreenRecording() ? Color.rgb(222, 93, 106) : COLOR_MUTED);
+        updatingOverlayRuntimeSwitches = false;
+    }
+
+    private void setOverlayRuntimeSwitch(Switch control, boolean checked, int accent) {
+        if (control == null) {
+            return;
         }
-        if (overlayVisibilitySwitch != null) {
-            updatingOverlayVisibilitySwitch = true;
-            overlayVisibilitySwitch.setChecked(!hidden);
-            updatingOverlayVisibilitySwitch = false;
-        }
+        control.setChecked(checked);
+        control.setTextColor(accent);
     }
 
     /** Stores meaningful overlay choices even before the capture service exists. */
