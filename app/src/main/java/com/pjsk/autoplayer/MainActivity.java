@@ -301,7 +301,7 @@ public final class MainActivity extends Activity {
         pageTabs.addView(logicPageButton, pageTabParams(true));
         pageTabs.addView(debugPageButton, pageTabParams(false));
         LinearLayout.LayoutParams pageTabsParams = matchWrap();
-        pageTabsParams.setMargins(0, dp(12), 0, dp(2));
+        pageTabsParams.setMargins(0, dp(12), 0, dp(10));
         root.addView(pageTabs, pageTabsParams);
 
         ScrollView pageScrollView = new ScrollView(this);
@@ -315,7 +315,7 @@ public final class MainActivity extends Activity {
         LinearLayout pageContent = new LinearLayout(this);
         pageContent.setOrientation(LinearLayout.VERTICAL);
         pageContent.setGravity(Gravity.CENTER_HORIZONTAL);
-        pageContent.setPadding(0, dp(4), 0, dp(24));
+        pageContent.setPadding(0, 0, 0, dp(24));
         pageScrollView.addView(pageContent, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
