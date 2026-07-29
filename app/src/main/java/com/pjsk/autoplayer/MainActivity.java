@@ -65,6 +65,8 @@ public final class MainActivity extends Activity {
     private TextView noteModelView;
     private TextView customOverlayActionView;
     private TextView overlayRuntimeStateView;
+    private LinearLayout overlayRuntimePanel;
+    private Switch overlayVisibilitySwitch;
     private SeekBar calibrationSeekBar;
     private Switch previewSwitch;
     private Switch noClickSwitch;
@@ -89,6 +91,7 @@ public final class MainActivity extends Activity {
     private final List<String> logicDifficulties = new ArrayList<>();
     private boolean updatingLogicChartSelectors;
     private boolean updatingCalibrationUi;
+    private boolean updatingOverlayVisibilitySwitch;
     private boolean captureRequestInFlight;
     private LinearLayout runPage;
     private LinearLayout logicPage;
@@ -1213,25 +1216,77 @@ public final class MainActivity extends Activity {
         titleParams.setMargins(0, dp(12), 0, dp(4));
         root.addView(title, titleParams);
 
-        overlayRuntimeStateView = new TextView(this);
-        styleReadout(overlayRuntimeStateView);
-        LinearLayout.LayoutParams runtimeStateParams = matchWrap();
-        runtimeStateParams.setMargins(0, 0, 0, dp(6));
-        root.addView(overlayRuntimeStateView, runtimeStateParams);
-        updateOverlayRuntimeStateUi();
+        LinearLayout runtimeRow = new LinearLayout(this);
+        runtimeRow.setOrientation(LinearLayout.HORIZONTAL);
+        runtimeRow.setGravity(Gravity.TOP);
 
-        addOverlayRuntimeButton(root, "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3",
+        LinearLayout commandColumn = new LinearLayout(this);
+        commandColumn.setOrientation(LinearLayout.VERTICAL);
+        addOverlayRuntimeButton(commandColumn, "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3",
                 CaptureService.ACTION_TOGGLE_OVERLAY_VISIBILITY);
-        addOverlayRuntimeButton(root, "\u6298\u53e0/\u5c55\u5f00\u5c0f\u7a97\u53e3",
+        addOverlayRuntimeButton(commandColumn, "\u6298\u53e0/\u5c55\u5f00\u5c0f\u7a97\u53e3",
                 CaptureService.ACTION_TOGGLE_OVERLAY_COLLAPSE);
-        addOverlayRuntimeButton(root, "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3\u53c2\u6570",
+        addOverlayRuntimeButton(commandColumn, "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3\u53c2\u6570",
                 CaptureService.ACTION_TOGGLE_OVERLAY_PARAMETERS);
-        addOverlayRuntimeButton(root, "\u91cd\u7f6e\u8fd0\u884c\u72b6\u6001",
+        addOverlayRuntimeButton(commandColumn, "\u91cd\u7f6e\u8fd0\u884c\u72b6\u6001",
                 CaptureService.ACTION_RESET_PLAYBACK);
-        addOverlayRuntimeButton(root, "\u5f00\u5173\u8c03\u8bd5\u663e\u793a",
+        addOverlayRuntimeButton(commandColumn, "\u5f00\u5173\u8c03\u8bd5\u663e\u793a",
                 CaptureService.ACTION_TOGGLE_DEBUG_DISPLAY);
-        addOverlayRuntimeButton(root, "\u5f00\u59cb/\u7ed3\u675f\u5f55\u5c4f",
+        addOverlayRuntimeButton(commandColumn, "\u5f00\u59cb/\u7ed3\u675f\u5f55\u5c4f",
                 CaptureService.ACTION_TOGGLE_SCREEN_RECORDING);
+        LinearLayout.LayoutParams commandParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        commandParams.setMargins(0, 0, dp(8), 0);
+        runtimeRow.addView(commandColumn, commandParams);
+
+        overlayRuntimePanel = new LinearLayout(this);
+        overlayRuntimePanel.setOrientation(LinearLayout.VERTICAL);
+        overlayRuntimePanel.setGravity(Gravity.CENTER_HORIZONTAL);
+        overlayRuntimePanel.setPadding(dp(8), dp(10), dp(8), dp(8));
+        overlayRuntimePanel.setMinimumHeight(dp(318));
+
+        TextView panelTitle = new TextView(this);
+        panelTitle.setText("\u5c0f\u7a97\u53e3\n\u72b6\u6001");
+        panelTitle.setTextColor(COLOR_MUTED);
+        panelTitle.setTextSize(11f);
+        panelTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        panelTitle.setGravity(Gravity.CENTER);
+        overlayRuntimePanel.addView(panelTitle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        overlayRuntimeStateView = new TextView(this);
+        overlayRuntimeStateView.setTextSize(14f);
+        overlayRuntimeStateView.setTypeface(Typeface.DEFAULT_BOLD);
+        overlayRuntimeStateView.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams runtimeStateParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+        runtimeStateParams.setMargins(0, dp(8), 0, dp(6));
+        overlayRuntimePanel.addView(overlayRuntimeStateView, runtimeStateParams);
+
+        overlayVisibilitySwitch = new Switch(this);
+        overlayVisibilitySwitch.setTag("overlay-toggle");
+        overlayVisibilitySwitch.setText("\u663e\u793a");
+        overlayVisibilitySwitch.setGravity(Gravity.CENTER);
+        overlayVisibilitySwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (updatingOverlayVisibilitySwitch) {
+                return;
+            }
+            if (!CaptureService.isRunning()) {
+                AppSettings.setOverlayHidden(this, !isChecked);
+                updateOverlayRuntimeStateUi();
+                return;
+            }
+            startService(new Intent(this, CaptureService.class)
+                    .setAction(CaptureService.ACTION_TOGGLE_OVERLAY_VISIBILITY));
+            overlayVisibilitySwitch.postDelayed(this::updateOverlayRuntimeStateUi, 180L);
+        });
+        overlayRuntimePanel.addView(overlayVisibilitySwitch, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+
+        runtimeRow.addView(overlayRuntimePanel, new LinearLayout.LayoutParams(
+                dp(116), LinearLayout.LayoutParams.MATCH_PARENT));
+        root.addView(runtimeRow, matchWrap());
+        updateOverlayRuntimeStateUi();
     }
 
     private void addOverlayRuntimeButton(LinearLayout root, String label, String action) {
@@ -1260,18 +1315,25 @@ public final class MainActivity extends Activity {
         boolean debugEnabled = AppSettings.isDebugDisplayEnabled(this);
         String visibility = hidden ? "\u5df2\u9690\u85cf" : "\u5df2\u663e\u793a";
         String shape = collapsed ? "\u5df2\u6298\u53e0" : "\u5df2\u5c55\u5f00";
-        overlayRuntimeStateView.setText("\u5f53\u524d\u5c0f\u7a97\u53e3\uff1a" + visibility
-                + "  |  " + shape
-                + "\n\u53c2\u6570\uff1a" + (parametersVisible ? "\u5df2\u663e\u793a" : "\u5df2\u9690\u85cf")
-                + "  |  \u8c03\u8bd5\uff1a" + (debugEnabled ? "\u5df2\u5f00\u542f" : "\u5df2\u5173\u95ed"));
+        overlayRuntimeStateView.setText(visibility
+                + "\n" + shape
+                + "\n\u53c2\u6570" + (parametersVisible ? "\u663e\u793a" : "\u9690\u85cf")
+                + "\n\u8c03\u8bd5" + (debugEnabled ? "\u5f00" : "\u5173"));
         int accent = hidden
                 ? Color.rgb(190, 92, 70)
                 : collapsed ? Color.rgb(184, 126, 55) : Color.rgb(33, 133, 91);
         overlayRuntimeStateView.setTextColor(accent);
-        overlayRuntimeStateView.setBackground(makeRoundedBackground(
-                Color.rgb(246, 250, 252),
-                accent,
-                8));
+        if (overlayRuntimePanel != null) {
+            overlayRuntimePanel.setBackground(makeRoundedBackground(
+                    Color.rgb(246, 250, 252),
+                    accent,
+                    10));
+        }
+        if (overlayVisibilitySwitch != null) {
+            updatingOverlayVisibilitySwitch = true;
+            overlayVisibilitySwitch.setChecked(!hidden);
+            updatingOverlayVisibilitySwitch = false;
+        }
     }
 
     /** Stores meaningful overlay choices even before the capture service exists. */
@@ -1381,6 +1443,15 @@ public final class MainActivity extends Activity {
             styleButton((Button) view);
         } else if (view instanceof Switch) {
             Switch control = (Switch) view;
+            if ("overlay-toggle".equals(control.getTag())) {
+                control.setTextColor(COLOR_MUTED);
+                control.setTextSize(11f);
+                control.setMinHeight(0);
+                control.setMinimumHeight(0);
+                control.setPadding(0, 0, 0, 0);
+                control.setBackgroundColor(Color.TRANSPARENT);
+                return;
+            }
             control.setTextColor(COLOR_TEXT);
             control.setTextSize(14f);
             control.setMinHeight(dp(48));
