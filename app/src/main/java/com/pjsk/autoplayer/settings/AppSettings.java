@@ -17,7 +17,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class AppSettings {
     private static final String PREFS_NAME = "pjsk_settings";
@@ -27,13 +29,20 @@ public final class AppSettings {
     private static final String KEY_LOGIC_PLAY_MODE_ENABLED = "logic_play_mode_enabled";
     private static final String KEY_LOGIC_PROFILES_JSON = "logic_profiles_json";
     private static final String KEY_SELECTED_LOGIC_PROFILE_ID = "selected_logic_profile_id";
+    private static final String KEY_SELECTED_LOGIC_CHART_SONG_ID = "selected_logic_chart_song_id";
+    private static final String KEY_SELECTED_LOGIC_CHART_DIFFICULTY = "selected_logic_chart_difficulty";
     private static final String KEY_DEBUG_DISPLAY_ENABLED = "debug_display_enabled";
     private static final String KEY_ACTION_Y = "action_y";
     private static final String KEY_TOUCH_MAPPING_MODE = "touch_mapping_mode";
     private static final String KEY_NOTE_MODEL_MODE = "note_model_mode";
+    private static final String KEY_OVERLAY_CUSTOM_ACTION = "overlay_custom_action";
+    private static final String KEY_OVERLAY_HIDDEN = "overlay_hidden";
+    private static final String KEY_OVERLAY_COLLAPSED = "overlay_collapsed";
+    private static final String KEY_OVERLAY_PARAMETERS_VISIBLE = "overlay_parameters_visible";
     private static final String KEY_CAPTURE_TARGET_PACKAGE = "capture_target_package";
     private static final String KEY_CAPTURE_TARGET_LABEL = "capture_target_label";
     private static final int MAX_LOGIC_JSON_BYTES = 8 * 1024 * 1024;
+    private static final String LOGIC_CHART_INDEX_FILE = "logic_chart_index.json";
 
     public static final int ACTION_Y_MIN = (int) Config.ACTION_Y_MIN;
     public static final int ACTION_Y_MAX = (int) Config.ACTION_Y_MAX;
@@ -44,12 +53,24 @@ public final class AppSettings {
     public static final int NOTE_MODEL_ORIGINAL = 0;
     public static final int NOTE_MODEL_RETRAINED = 1;
     public static final int NOTE_MODEL_INT8 = 2;
+    public static final int OVERLAY_CUSTOM_NONE = 0;
+    public static final int OVERLAY_CUSTOM_PREVIEW = 1;
+    public static final int OVERLAY_CUSTOM_NO_CLICK = 2;
+    public static final int OVERLAY_CUSTOM_AUTO_SOLO = 3;
+    public static final int OVERLAY_CUSTOM_LOGIC_PLAY = 4;
+    public static final int OVERLAY_CUSTOM_SWITCH_LOGIC = 5;
+    public static final int OVERLAY_CUSTOM_RESET_STATE = 6;
+    public static final int OVERLAY_CUSTOM_DEBUG_DISPLAY = 7;
+    public static final int OVERLAY_CUSTOM_SCREEN_RECORD = 8;
+    public static final int OVERLAY_CUSTOM_STOP = 9;
 
     private static final String LEGACY_DEFAULT_LOGIC_PROFILE_ID = "default_2hz_center";
     private static final int DEFAULT_LOGIC_TAP_INTERVAL_MS = 500;
     private static final double DEFAULT_LOGIC_TAP_X_RATIO = 0.5;
     private static boolean logicProfileSourcesLoaded;
     private static List<LogicProfileSource> cachedLogicProfileSources = Collections.emptyList();
+    private static boolean logicChartIndexLoaded;
+    private static List<LogicChartEntry> cachedLogicChartIndex = Collections.emptyList();
     private static String cachedLoadedProfileSourceId = "";
     private static long cachedLoadedProfileModified;
     private static long cachedLoadedProfileLength;
@@ -124,23 +145,108 @@ public final class AppSettings {
         return directory;
     }
 
+    /** Rebuilds the filename-only chart index used by the song and difficulty selectors. */
+    public static synchronized int refreshLogicChartIndex(Context context) {
+        File directory = logicProfilesDirectory(context);
+        File[] files = directory.listFiles((dir, name) ->
+                name != null && name.toLowerCase().endsWith(".json")
+                        && !LOGIC_CHART_INDEX_FILE.equalsIgnoreCase(name));
+        List<File> sortedFiles = new ArrayList<>();
+        if (files != null) {
+            Collections.addAll(sortedFiles, files);
+        }
+        Collections.sort(sortedFiles, (left, right) ->
+                left.getName().compareToIgnoreCase(right.getName()));
+
+        Map<String, List<String>> difficultiesBySong = new HashMap<>();
+        List<LogicProfileSource> sources = new ArrayList<>();
+        for (File file : sortedFiles) {
+            String id = fileIdForName(file.getName());
+            if (id.isEmpty()) {
+                continue;
+            }
+            sources.add(new LogicProfileSource(id, displayNameForFileId(id), file));
+            LogicChartFileName chart = LogicChartFileName.parse(id);
+            if (chart == null) {
+                continue;
+            }
+            List<String> difficulties = difficultiesBySong.get(chart.songId);
+            if (difficulties == null) {
+                difficulties = new ArrayList<>();
+                difficultiesBySong.put(chart.songId, difficulties);
+            }
+            if (!difficulties.contains(chart.difficulty)) {
+                difficulties.add(chart.difficulty);
+            }
+        }
+
+        List<LogicChartEntry> charts = new ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : difficultiesBySong.entrySet()) {
+            List<String> difficulties = entry.getValue();
+            Collections.sort(difficulties, AppSettings::compareDifficulties);
+            charts.add(new LogicChartEntry(entry.getKey(), difficulties));
+        }
+        Collections.sort(charts, (left, right) -> compareSongIds(left.songId, right.songId));
+        cachedLogicChartIndex = Collections.unmodifiableList(charts);
+        logicChartIndexLoaded = true;
+        cachedLogicProfileSources = Collections.unmodifiableList(sources);
+        logicProfileSourcesLoaded = true;
+        cachedLoadedProfile = null;
+        cachedLoadedProfileSourceId = "";
+        writeLogicChartIndex(directory, charts);
+        ensureSelectedLogicChart(context, charts);
+        return charts.size();
+    }
+
+    public static List<String> logicChartSongIds(Context context) {
+        List<String> ids = new ArrayList<>();
+        for (LogicChartEntry chart : logicChartIndex(context)) {
+            ids.add(chart.songId);
+        }
+        return ids;
+    }
+
+    public static List<String> logicChartDifficulties(Context context, String songId) {
+        LogicChartEntry chart = findLogicChart(logicChartIndex(context), songId);
+        return chart == null ? Collections.emptyList() : chart.difficulties;
+    }
+
+    public static String selectedLogicChartSongId(Context context) {
+        return prefs(context).getString(KEY_SELECTED_LOGIC_CHART_SONG_ID, "");
+    }
+
+    public static String selectedLogicChartDifficulty(Context context) {
+        return prefs(context).getString(KEY_SELECTED_LOGIC_CHART_DIFFICULTY, "");
+    }
+
+    public static boolean selectLogicChart(Context context, String songId, String difficulty) {
+        LogicChartEntry chart = findLogicChart(logicChartIndex(context), songId);
+        if (chart == null || difficulty == null || !chart.difficulties.contains(difficulty)) {
+            return false;
+        }
+        String profileId = chart.songId + "_" + difficulty;
+        prefs(context).edit()
+                .putString(KEY_SELECTED_LOGIC_CHART_SONG_ID, chart.songId)
+                .putString(KEY_SELECTED_LOGIC_CHART_DIFFICULTY, difficulty)
+                .putString(KEY_SELECTED_LOGIC_PROFILE_ID, profileId)
+                .apply();
+        return true;
+    }
+
+    /** Reapplies the chart selected by song ID and difficulty without cycling unrelated files. */
+    public static String reloadSelectedLogicChart(Context context) {
+        String songId = selectedLogicChartSongId(context);
+        String difficulty = selectedLogicChartDifficulty(context);
+        if (!selectLogicChart(context, songId, difficulty)) {
+            return "\u672a\u627e\u5230\u5df2\u9009\u8c31\u9762";
+        }
+        return songId + " " + difficulty;
+    }
+
     /** Refreshes the selector index without reading or parsing chart events. */
     public static int importLogicProfilesFromDirectory(Context context) {
-        List<LogicProfileSource> sources = refreshLogicProfileSources(context);
-        String selectedId = selectedLogicProfileId(context);
-        LogicProfileSource selected = findLogicProfileSource(sources, selectedId);
-        if (selected == null) {
-            selectedId = sources.isEmpty() ? "" : sources.get(0).id;
-        } else if (!selected.id.equals(selectedId)) {
-            selectedId = selected.id;
-        }
-        prefs(context).edit()
-                // Old builds stored every parsed event here. Keep only the
-                // selected filename so thousands of charts cannot block launch.
-                .remove(KEY_LOGIC_PROFILES_JSON)
-                .putString(KEY_SELECTED_LOGIC_PROFILE_ID, selectedId)
-                .apply();
-        return sources.size();
+        refreshLogicChartIndex(context);
+        return logicProfileSources(context).size();
     }
 
     public static List<LogicProfileChoice> logicProfileChoices(Context context) {
@@ -232,6 +338,30 @@ public final class AppSettings {
         prefs(context).edit().putBoolean(KEY_DEBUG_DISPLAY_ENABLED, enabled).apply();
     }
 
+    public static boolean isOverlayHidden(Context context) {
+        return prefs(context).getBoolean(KEY_OVERLAY_HIDDEN, false);
+    }
+
+    public static void setOverlayHidden(Context context, boolean hidden) {
+        prefs(context).edit().putBoolean(KEY_OVERLAY_HIDDEN, hidden).apply();
+    }
+
+    public static boolean isOverlayCollapsed(Context context) {
+        return prefs(context).getBoolean(KEY_OVERLAY_COLLAPSED, false);
+    }
+
+    public static void setOverlayCollapsed(Context context, boolean collapsed) {
+        prefs(context).edit().putBoolean(KEY_OVERLAY_COLLAPSED, collapsed).apply();
+    }
+
+    public static boolean isOverlayParametersVisible(Context context) {
+        return prefs(context).getBoolean(KEY_OVERLAY_PARAMETERS_VISIBLE, false);
+    }
+
+    public static void setOverlayParametersVisible(Context context, boolean visible) {
+        prefs(context).edit().putBoolean(KEY_OVERLAY_PARAMETERS_VISIBLE, visible).apply();
+    }
+
     public static double getActionY(Context context) {
         return clampActionY(prefs(context).getFloat(KEY_ACTION_Y, (float) Config.ACTION_Y_DEFAULT));
     }
@@ -318,6 +448,53 @@ public final class AppSettings {
         }
     }
 
+    public static int getOverlayCustomAction(Context context) {
+        int action = prefs(context).getInt(KEY_OVERLAY_CUSTOM_ACTION, OVERLAY_CUSTOM_NONE);
+        return action >= OVERLAY_CUSTOM_NONE && action <= OVERLAY_CUSTOM_STOP
+                ? action : OVERLAY_CUSTOM_NONE;
+    }
+
+    public static void setOverlayCustomAction(Context context, int action) {
+        prefs(context).edit()
+                .putInt(KEY_OVERLAY_CUSTOM_ACTION, clampOverlayCustomAction(action))
+                .apply();
+    }
+
+    public static int nextOverlayCustomAction(Context context) {
+        int action = getOverlayCustomAction(context) + 1;
+        if (action > OVERLAY_CUSTOM_STOP) {
+            action = OVERLAY_CUSTOM_NONE;
+        }
+        setOverlayCustomAction(context, action);
+        return action;
+    }
+
+    public static String overlayCustomActionLabel(int action) {
+        switch (action) {
+            case OVERLAY_CUSTOM_PREVIEW:
+                return "\u9884\u89c8";
+            case OVERLAY_CUSTOM_NO_CLICK:
+                return "\u4e0d\u70b9\u51fb";
+            case OVERLAY_CUSTOM_AUTO_SOLO:
+                return "\u81ea\u52a8\u5355\u4eba";
+            case OVERLAY_CUSTOM_LOGIC_PLAY:
+                return "\u903b\u8f91\u6f14\u594f";
+            case OVERLAY_CUSTOM_SWITCH_LOGIC:
+                return "\u6362\u8c31";
+            case OVERLAY_CUSTOM_RESET_STATE:
+                return "\u91cd\u7f6e\u72b6\u6001";
+            case OVERLAY_CUSTOM_DEBUG_DISPLAY:
+                return "\u8c03\u8bd5\u663e\u793a";
+            case OVERLAY_CUSTOM_SCREEN_RECORD:
+                return "\u5f55\u5c4f";
+            case OVERLAY_CUSTOM_STOP:
+                return "\u505c\u6b62\u8fd0\u884c";
+            case OVERLAY_CUSTOM_NONE:
+            default:
+                return "\u4e0d\u663e\u793a";
+        }
+    }
+
     private static int clampTouchMappingMode(int mode) {
         if (mode < TOUCH_MAPPING_LANDSCAPE_90 || mode > TOUCH_MAPPING_LANDSCAPE_270) {
             return TOUCH_MAPPING_LANDSCAPE_90;
@@ -330,6 +507,11 @@ public final class AppSettings {
             return NOTE_MODEL_ORIGINAL;
         }
         return mode;
+    }
+
+    private static int clampOverlayCustomAction(int action) {
+        return action >= OVERLAY_CUSTOM_NONE && action <= OVERLAY_CUSTOM_STOP
+                ? action : OVERLAY_CUSTOM_NONE;
     }
 
 
@@ -358,8 +540,20 @@ public final class AppSettings {
     }
 
     private static LogicProfileSource selectedLogicProfileSource(Context context) {
-        List<LogicProfileSource> profiles = logicProfileSources(context);
         String selectedId = selectedLogicProfileId(context);
+        if (!selectedId.isEmpty()) {
+            File directory = logicProfilesDirectory(context);
+            File logicFile = new File(directory, selectedId + ".logic.json");
+            File jsonFile = new File(directory, selectedId + ".json");
+            File selectedFile = logicFile.isFile() ? logicFile : (jsonFile.isFile() ? jsonFile : null);
+            if (selectedFile != null) {
+                return new LogicProfileSource(
+                        selectedId,
+                        displayNameForFileId(selectedId),
+                        selectedFile);
+            }
+        }
+        List<LogicProfileSource> profiles = logicProfileSources(context);
         LogicProfileSource selected = findLogicProfileSource(profiles, selectedId);
         if (selected != null) {
             if (!selected.id.equals(selectedId)) {
@@ -381,7 +575,8 @@ public final class AppSettings {
 
     private static synchronized List<LogicProfileSource> refreshLogicProfileSources(Context context) {
         File[] files = logicProfilesDirectory(context).listFiles((dir, name) ->
-                name != null && name.toLowerCase().endsWith(".json"));
+                name != null && name.toLowerCase().endsWith(".json")
+                        && !LOGIC_CHART_INDEX_FILE.equalsIgnoreCase(name));
         List<File> sortedFiles = new ArrayList<>();
         if (files != null) {
             Collections.addAll(sortedFiles, files);
@@ -407,6 +602,152 @@ public final class AppSettings {
         return logicProfileSourcesLoaded
                 ? cachedLogicProfileSources
                 : refreshLogicProfileSources(context);
+    }
+
+    private static synchronized List<LogicChartEntry> logicChartIndex(Context context) {
+        if (logicChartIndexLoaded) {
+            return cachedLogicChartIndex;
+        }
+        File indexFile = new File(logicProfilesDirectory(context), LOGIC_CHART_INDEX_FILE);
+        List<LogicChartEntry> charts = readLogicChartIndex(indexFile);
+        if (charts.isEmpty()) {
+            refreshLogicChartIndex(context);
+            return cachedLogicChartIndex;
+        }
+        cachedLogicChartIndex = Collections.unmodifiableList(charts);
+        logicChartIndexLoaded = true;
+        ensureSelectedLogicChart(context, charts);
+        return cachedLogicChartIndex;
+    }
+
+    private static List<LogicChartEntry> readLogicChartIndex(File indexFile) {
+        String json = readLogicJsonFile(indexFile);
+        if (json == null) {
+            return Collections.emptyList();
+        }
+        try {
+            JSONObject root = new JSONObject(json);
+            JSONArray chartArray = root.optJSONArray("charts");
+            if (chartArray == null) {
+                return Collections.emptyList();
+            }
+            List<LogicChartEntry> charts = new ArrayList<>();
+            for (int i = 0; i < chartArray.length(); i++) {
+                JSONObject chart = chartArray.optJSONObject(i);
+                if (chart == null) {
+                    continue;
+                }
+                String songId = chart.optString("songId", "").trim();
+                JSONArray difficultyArray = chart.optJSONArray("difficulties");
+                if (!isDigits(songId) || difficultyArray == null) {
+                    continue;
+                }
+                List<String> difficulties = new ArrayList<>();
+                for (int j = 0; j < difficultyArray.length(); j++) {
+                    String difficulty = difficultyArray.optString(j, "").trim().toLowerCase();
+                    if (!difficulty.isEmpty() && !difficulties.contains(difficulty)) {
+                        difficulties.add(difficulty);
+                    }
+                }
+                if (!difficulties.isEmpty()) {
+                    Collections.sort(difficulties, AppSettings::compareDifficulties);
+                    charts.add(new LogicChartEntry(songId, difficulties));
+                }
+            }
+            Collections.sort(charts, (left, right) -> compareSongIds(left.songId, right.songId));
+            return charts;
+        } catch (JSONException ignored) {
+            return Collections.emptyList();
+        }
+    }
+
+    private static void writeLogicChartIndex(File directory, List<LogicChartEntry> charts) {
+        JSONObject root = new JSONObject();
+        JSONArray chartArray = new JSONArray();
+        for (LogicChartEntry chart : charts) {
+            JSONObject item = new JSONObject();
+            try {
+                item.put("songId", chart.songId);
+                JSONArray difficulties = new JSONArray();
+                for (String difficulty : chart.difficulties) {
+                    difficulties.put(difficulty);
+                }
+                item.put("difficulties", difficulties);
+                chartArray.put(item);
+            } catch (JSONException ignored) {
+            }
+        }
+        try {
+            root.put("version", 1);
+            root.put("charts", chartArray);
+            try (FileOutputStream output = new FileOutputStream(
+                    new File(directory, LOGIC_CHART_INDEX_FILE), false)) {
+                output.write(root.toString().getBytes("UTF-8"));
+                output.flush();
+            }
+        } catch (IOException | JSONException ignored) {
+        }
+    }
+
+    private static void ensureSelectedLogicChart(Context context, List<LogicChartEntry> charts) {
+        if (charts.isEmpty()) {
+            return;
+        }
+        String songId = selectedLogicChartSongId(context);
+        String difficulty = selectedLogicChartDifficulty(context);
+        LogicChartEntry current = findLogicChart(charts, songId);
+        if (current == null || !current.difficulties.contains(difficulty)) {
+            LogicChartEntry fallback = charts.get(0);
+            selectLogicChart(context, fallback.songId, fallback.difficulties.get(0));
+        }
+    }
+
+    private static LogicChartEntry findLogicChart(List<LogicChartEntry> charts, String songId) {
+        if (songId == null) {
+            return null;
+        }
+        for (LogicChartEntry chart : charts) {
+            if (chart.songId.equals(songId)) {
+                return chart;
+            }
+        }
+        return null;
+    }
+
+    private static int compareSongIds(String left, String right) {
+        try {
+            return Integer.compare(Integer.parseInt(left), Integer.parseInt(right));
+        } catch (NumberFormatException ignored) {
+            return left.compareTo(right);
+        }
+    }
+
+    private static int compareDifficulties(String left, String right) {
+        int leftRank = difficultyRank(left);
+        int rightRank = difficultyRank(right);
+        return leftRank != rightRank ? Integer.compare(leftRank, rightRank) : left.compareTo(right);
+    }
+
+    private static int difficultyRank(String difficulty) {
+        if ("easy".equals(difficulty)) return 0;
+        if ("normal".equals(difficulty)) return 1;
+        if ("hard".equals(difficulty)) return 2;
+        if ("expert".equals(difficulty)) return 3;
+        if ("master".equals(difficulty)) return 4;
+        if ("append".equals(difficulty)) return 5;
+        return 100;
+    }
+
+    private static boolean isDigits(String value) {
+        if (value == null || value.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            if (!Character.isDigit(value.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static LogicProfileSource findLogicProfileSource(
@@ -583,6 +924,44 @@ public final class AppSettings {
         boolean matchesLegacyId(String legacyId) {
             return id.equals(legacyId)
                     || (file != null && file.getName().equalsIgnoreCase(legacyId + ".logic.json"));
+        }
+    }
+
+    /** A single song entry in the filename-only selector index. */
+    private static final class LogicChartEntry {
+        final String songId;
+        final List<String> difficulties;
+
+        LogicChartEntry(String songId, List<String> difficulties) {
+            this.songId = songId;
+            this.difficulties = Collections.unmodifiableList(new ArrayList<>(difficulties));
+        }
+    }
+
+    /** Parses a conventional chart filename such as 0001_easy.logic.json. */
+    private static final class LogicChartFileName {
+        final String songId;
+        final String difficulty;
+
+        LogicChartFileName(String songId, String difficulty) {
+            this.songId = songId;
+            this.difficulty = difficulty;
+        }
+
+        static LogicChartFileName parse(String fileId) {
+            if (fileId == null) {
+                return null;
+            }
+            int separator = fileId.indexOf('_');
+            if (separator <= 0 || separator >= fileId.length() - 1) {
+                return null;
+            }
+            String songId = fileId.substring(0, separator).trim();
+            String difficulty = fileId.substring(separator + 1).trim().toLowerCase();
+            if (!isDigits(songId) || difficulty.isEmpty()) {
+                return null;
+            }
+            return new LogicChartFileName(songId, difficulty);
         }
     }
 

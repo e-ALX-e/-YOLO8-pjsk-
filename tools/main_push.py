@@ -19,12 +19,12 @@ sources = [
 ]
 
 for i in range(1,761):
-    sources.append(chart_for_song(f"{i}", "easy"))
-    sources.append(chart_for_song(f"{i}", "normal"))
-    sources.append(chart_for_song(f"{i}", "hard"))
-    sources.append(chart_for_song(f"{i}", "master"))
-    sources.append(chart_for_song(f"{i}", "append"))
-
+    # sources.append(chart_for_song(f"{i}", "easy"))
+    # sources.append(chart_for_song(f"{i}", "normal"))
+    # sources.append(chart_for_song(f"{i}", "hard"))
+    # sources.append(chart_for_song(f"{i}", "master"))
+    # sources.append(chart_for_song(f"{i}", "append"))
+    sources.append(chart_for_song(f"{i}",···· "expert"))
 
 
 written, unchanged = convert_logic_charts(sources, force=False)
@@ -34,14 +34,14 @@ print(f"已转换: {len(written)}")
 
 
 
-
-# push_list = [*written, *unchanged]
+# 本批次转换的文件
+push_list = [*written, *unchanged]
 
 # D:\pjsk\pjsk\android_native\tools\sus_json
 # 所有后缀为json的文件
-push_list = [
-    str(p) for p in Path("D:/pjsk/pjsk/android_native/tools/sus_json").glob("*.json")
-]
+# push_list = [
+#     str(p) for p in Path("D:/pjsk/pjsk/android_native/tools/sus_json").glob("*.json")
+# ]
 
 
 

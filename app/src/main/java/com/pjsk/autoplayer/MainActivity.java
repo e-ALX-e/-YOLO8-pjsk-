@@ -10,6 +10,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
@@ -18,6 +19,8 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.AdapterView;
 import android.widget.Button;
@@ -32,6 +35,7 @@ import android.widget.Spinner;
 
 import com.pjsk.autoplayer.overlay.StatusOverlay;
 import com.pjsk.autoplayer.settings.AppSettings;
+import com.pjsk.autoplayer.settings.DebugDisplayController;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -44,12 +48,23 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_CAPTURE = 1001;
     private static final int MAX_VISIBLE_LOGIC_PROFILES = 120;
     public static final String EXTRA_AUTO_REAUTHORIZE = "autoReauthorize";
+    public static final String EXTRA_OPEN_LOGIC_CHART_PICKER = "openLogicChartPicker";
+
+    private static final int COLOR_PAGE = Color.rgb(244, 247, 251);
+    private static final int COLOR_SURFACE = Color.rgb(255, 255, 255);
+    private static final int COLOR_TEXT = Color.rgb(28, 38, 52);
+    private static final int COLOR_MUTED = Color.rgb(101, 114, 130);
+    private static final int COLOR_BORDER = Color.rgb(220, 228, 238);
+    private static final int COLOR_PRIMARY = Color.rgb(43, 169, 156);
+    private static final int COLOR_DANGER = Color.rgb(222, 93, 106);
 
     private TextView statusView;
     private TextView overlayStatusView;
     private TextView calibrationValueView;
     private TextView touchMappingView;
     private TextView noteModelView;
+    private TextView customOverlayActionView;
+    private TextView overlayRuntimeStateView;
     private SeekBar calibrationSeekBar;
     private Switch previewSwitch;
     private Switch noClickSwitch;
@@ -66,12 +81,35 @@ public final class MainActivity extends Activity {
     private ArrayAdapter<String> logicProfileAdapter;
     private final List<AppSettings.LogicProfileChoice> visibleLogicProfiles = new ArrayList<>();
     private boolean updatingLogicProfileSelector;
+    private Spinner logicSongSelector;
+    private Spinner logicDifficultySelector;
+    private ArrayAdapter<String> logicSongAdapter;
+    private ArrayAdapter<String> logicDifficultyAdapter;
+    private final List<String> logicSongIds = new ArrayList<>();
+    private final List<String> logicDifficulties = new ArrayList<>();
+    private boolean updatingLogicChartSelectors;
     private boolean updatingCalibrationUi;
     private boolean captureRequestInFlight;
+    private LinearLayout runPage;
+    private LinearLayout logicPage;
+    private LinearLayout debugPage;
+    private Button runPageButton;
+    private Button logicPageButton;
+    private Button debugPageButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        getWindow().setStatusBarColor(COLOR_PAGE);
+        getWindow().setNavigationBarColor(COLOR_PAGE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            int visibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                visibility |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            }
+            getWindow().getDecorView().setSystemUiVisibility(visibility);
+        }
 
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2001);
@@ -80,39 +118,72 @@ public final class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(20));
-        root.setBackgroundColor(Color.rgb(247, 248, 250));
+        root.setPadding(dp(16), dp(18) + statusBarHeight(), dp(16), dp(24));
+        root.setBackgroundColor(COLOR_PAGE);
 
         TextView title = new TextView(this);
-        title.setText("PJSK Native Auto");
-        title.setTextColor(Color.rgb(20, 24, 32));
-        title.setTextSize(22f);
+        title.setText("PJSK AUTO");
+        title.setTextColor(COLOR_TEXT);
+        title.setTextSize(24f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
-        root.addView(title, matchWrap());
+        title.setGravity(Gravity.START);
+        LinearLayout.LayoutParams titleParams = matchWrap();
+        titleParams.setMargins(0, 0, 0, dp(6));
+        root.addView(title, titleParams);
 
         statusView = new TextView(this);
         statusView.setText("状态：未启动");
-        statusView.setTextColor(Color.rgb(45, 52, 64));
-        statusView.setTextSize(15f);
-        statusView.setGravity(Gravity.CENTER);
+        statusView.setTextColor(COLOR_MUTED);
+        statusView.setTextSize(14f);
+        statusView.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        statusView.setPadding(dp(12), dp(9), dp(12), dp(9));
+        statusView.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 10));
         LinearLayout.LayoutParams statusParams = matchWrap();
-        statusParams.setMargins(0, dp(8), 0, dp(10));
+        statusParams.setMargins(0, 0, 0, dp(10));
         root.addView(statusView, statusParams);
+
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
 
         Button start = new Button(this);
         start.setText("开始运行");
         start.setAllCaps(false);
+        start.setTag("primary");
         start.setOnClickListener(v -> requestCapture());
-        root.addView(start, buttonParams());
+        actionRow.addView(start, actionButtonParams(true));
 
         Button stop = new Button(this);
         stop.setText("停止运行");
         stop.setAllCaps(false);
+        stop.setTag("danger");
         stop.setOnClickListener(v -> requestStop());
-        root.addView(stop, buttonParams());
+        actionRow.addView(stop, actionButtonParams(false));
+        LinearLayout.LayoutParams actionRowParams = matchWrap();
+        actionRowParams.setMargins(0, 0, 0, dp(4));
+        root.addView(actionRow, actionRowParams);
 
-        addCaptureTargetControls(root);
+        LinearLayout pageTabs = new LinearLayout(this);
+        pageTabs.setOrientation(LinearLayout.HORIZONTAL);
+        pageTabs.setGravity(Gravity.CENTER_VERTICAL);
+        runPageButton = createPageTab("运行", 0);
+        logicPageButton = createPageTab("逻辑", 1);
+        debugPageButton = createPageTab("调试", 2);
+        pageTabs.addView(runPageButton, pageTabParams(true));
+        pageTabs.addView(logicPageButton, pageTabParams(true));
+        pageTabs.addView(debugPageButton, pageTabParams(false));
+        LinearLayout.LayoutParams pageTabsParams = matchWrap();
+        pageTabsParams.setMargins(0, dp(12), 0, dp(2));
+        root.addView(pageTabs, pageTabsParams);
+
+        runPage = createPage();
+        logicPage = createPage();
+        debugPage = createPage();
+        root.addView(runPage, matchWrap());
+        root.addView(logicPage, matchWrap());
+        root.addView(debugPage, matchWrap());
+
+        addCaptureTargetControls(runPage);
 
         previewSwitch = new Switch(this);
         previewSwitch.setText("显示识别预览窗口");
@@ -133,7 +204,7 @@ public final class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams switchParams = matchWrap();
         switchParams.setMargins(0, dp(8), 0, 0);
-        root.addView(previewSwitch, switchParams);
+        runPage.addView(previewSwitch, switchParams);
 
         noClickSwitch = new Switch(this);
         noClickSwitch.setText("不点击模式（只识别，关闭后 5 秒恢复点击）");
@@ -148,7 +219,7 @@ public final class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams noClickParams = matchWrap();
         noClickParams.setMargins(0, dp(6), 0, 0);
-        root.addView(noClickSwitch, noClickParams);
+        runPage.addView(noClickSwitch, noClickParams);
 
         autoSoloSwitch = new Switch(this);
         autoSoloSwitch.setText("自动单人模式");
@@ -163,7 +234,7 @@ public final class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams autoSoloParams = matchWrap();
         autoSoloParams.setMargins(0, dp(6), 0, 0);
-        root.addView(autoSoloSwitch, autoSoloParams);
+        logicPage.addView(autoSoloSwitch, autoSoloParams);
 
         logicPlaySwitch = new Switch(this);
         logicPlaySwitch.setText("\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
@@ -184,38 +255,45 @@ public final class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams logicPlayParams = matchWrap();
         logicPlayParams.setMargins(0, dp(6), 0, 0);
-        root.addView(logicPlaySwitch, logicPlayParams);
+        logicPage.addView(logicPlaySwitch, logicPlayParams);
 
-        addLogicProfileControls(root);
+        addLogicProfileControls(logicPage);
 
-        addCalibrationControls(root);
-        addTouchMappingControls(root);
-        addNoteModelControls(root);
+        addCalibrationControls(debugPage);
+        addTouchMappingControls(debugPage);
+        addNoteModelControls(debugPage);
+        addOverlayCustomActionControls(debugPage);
+        addOverlayRuntimeControls(debugPage);
 
         overlayStatusView = new TextView(this);
-        overlayStatusView.setTextSize(15f);
-        overlayStatusView.setGravity(Gravity.CENTER);
+        overlayStatusView.setTextSize(13f);
+        overlayStatusView.setTextColor(COLOR_MUTED);
+        overlayStatusView.setGravity(Gravity.START);
         LinearLayout.LayoutParams overlayStatusParams = matchWrap();
         overlayStatusParams.setMargins(0, dp(12), 0, dp(4));
-        root.addView(overlayStatusView, overlayStatusParams);
+        debugPage.addView(overlayStatusView, overlayStatusParams);
 
         Button overlay = new Button(this);
         overlay.setText("开启悬浮窗权限");
         overlay.setAllCaps(false);
         overlay.setOnClickListener(v -> openOverlaySettings());
-        root.addView(overlay, buttonParams());
+        debugPage.addView(overlay, buttonParams());
 
         TextView hint = new TextView(this);
         hint.setText("运行后切到目标界面，左上角显示状态；识别预览会抽样显示画面、识别框、处理 FPS 和丢帧数。");
-        hint.setTextColor(Color.rgb(88, 96, 110));
-        hint.setTextSize(14f);
-        hint.setGravity(Gravity.CENTER);
+        hint.setTextColor(COLOR_MUTED);
+        hint.setTextSize(13f);
+        hint.setGravity(Gravity.START);
         LinearLayout.LayoutParams hintParams = matchWrap();
         hintParams.setMargins(0, dp(10), 0, 0);
-        root.addView(hint, hintParams);
+        runPage.addView(hint, hintParams);
 
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
+        scrollView.setClipToPadding(false);
+        scrollView.setBackgroundColor(COLOR_PAGE);
+        styleInteractiveViews(root);
+        setActivePage(0);
         scrollView.addView(root, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
@@ -224,6 +302,10 @@ public final class MainActivity extends Activity {
         if (getIntent().getBooleanExtra(EXTRA_AUTO_REAUTHORIZE, false)) {
             getIntent().removeExtra(EXTRA_AUTO_REAUTHORIZE);
             root.post(this::showReauthorizationRequired);
+        }
+        if (getIntent().getBooleanExtra(EXTRA_OPEN_LOGIC_CHART_PICKER, false)) {
+            getIntent().removeExtra(EXTRA_OPEN_LOGIC_CHART_PICKER);
+            root.post(() -> openLogicChartPicker(true));
         }
     }
 
@@ -235,6 +317,10 @@ public final class MainActivity extends Activity {
             intent.removeExtra(EXTRA_AUTO_REAUTHORIZE);
             showReauthorizationRequired();
         }
+        if (intent != null && intent.getBooleanExtra(EXTRA_OPEN_LOGIC_CHART_PICKER, false)) {
+            intent.removeExtra(EXTRA_OPEN_LOGIC_CHART_PICKER);
+            openLogicChartPicker(true);
+        }
     }
 
     @Override
@@ -244,6 +330,7 @@ public final class MainActivity extends Activity {
         if (previewSwitch != null) {
             previewSwitch.setChecked(AppSettings.isPreviewEnabled(this));
         }
+        updateOverlayRuntimeStateUi();
         if (noClickSwitch != null) {
             noClickSwitch.setChecked(AppSettings.isNoClickMode(this));
         }
@@ -254,9 +341,11 @@ public final class MainActivity extends Activity {
             logicPlaySwitch.setChecked(AppSettings.isLogicPlayModeEnabled(this));
         }
         updateLogicProfileUi();
+        updateLogicChartUi();
         updateCalibrationUi();
         updateTouchMappingUi();
         updateNoteModelUi();
+        updateOverlayCustomActionUi();
         updateCaptureTargetUi();
     }
 
@@ -327,19 +416,19 @@ public final class MainActivity extends Activity {
     private void addCaptureTargetControls(LinearLayout root) {
         TextView title = new TextView(this);
         title.setText("\u5355\u5e94\u7528\u5f55\u5c4f\u76ee\u6807");
-        title.setTextColor(Color.rgb(20, 24, 32));
-        title.setTextSize(16f);
+        title.setTextColor(COLOR_TEXT);
+        title.setTextSize(15f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
+        title.setGravity(Gravity.START);
         LinearLayout.LayoutParams titleParams = matchWrap();
         titleParams.setMargins(0, dp(12), 0, dp(2));
         root.addView(title, titleParams);
 
         captureTargetView = new TextView(this);
-        captureTargetView.setTextSize(14f);
-        captureTargetView.setTextColor(Color.rgb(72, 80, 94));
-        captureTargetView.setGravity(Gravity.CENTER);
-        root.addView(captureTargetView, matchWrap());
+        styleReadout(captureTargetView);
+        LinearLayout.LayoutParams captureTargetParams = matchWrap();
+        captureTargetParams.setMargins(0, 0, 0, dp(6));
+        root.addView(captureTargetView, captureTargetParams);
 
         captureTargetAdapter = new ArrayAdapter<>(
                 this, android.R.layout.simple_spinner_item, new ArrayList<>());
@@ -476,24 +565,234 @@ public final class MainActivity extends Activity {
     }
 
 
+    /** Chart selection is intentionally backed by a small filename-only index. */
     private void addLogicProfileControls(LinearLayout root) {
-        AppSettings.importLogicProfilesFromDirectory(this);
-
         TextView title = new TextView(this);
-        title.setText("\u903b\u8f91\u6f14\u594f");
-        title.setTextColor(Color.rgb(20, 24, 32));
-        title.setTextSize(16f);
+        title.setText("\u903b\u8f91\u8c31\u9762");
+        title.setTextColor(COLOR_TEXT);
+        title.setTextSize(15f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
+        title.setGravity(Gravity.START);
         LinearLayout.LayoutParams titleParams = matchWrap();
         titleParams.setMargins(0, dp(12), 0, dp(2));
         root.addView(title, titleParams);
 
         logicProfileView = new TextView(this);
-        logicProfileView.setTextColor(Color.rgb(45, 52, 64));
-        logicProfileView.setTextSize(15f);
-        logicProfileView.setGravity(Gravity.CENTER);
-        root.addView(logicProfileView, matchWrap());
+        styleReadout(logicProfileView);
+        LinearLayout.LayoutParams profileParams = matchWrap();
+        profileParams.setMargins(0, 0, 0, dp(6));
+        root.addView(logicProfileView, profileParams);
+
+        TextView directory = new TextView(this);
+        directory.setText("\u8c31\u9762\u76ee\u5f55\uff1a" + AppSettings.logicProfilesDirectory(this).getAbsolutePath());
+        directory.setTextColor(COLOR_MUTED);
+        directory.setTextSize(12f);
+        directory.setGravity(Gravity.CENTER);
+        root.addView(directory, matchWrap());
+
+        TextView songLabel = new TextView(this);
+        songLabel.setText("\u5e8f\u53f7");
+        songLabel.setTextColor(COLOR_MUTED);
+        songLabel.setTextSize(13f);
+        LinearLayout.LayoutParams songLabelParams = matchWrap();
+        songLabelParams.setMargins(0, dp(8), 0, dp(2));
+        root.addView(songLabel, songLabelParams);
+
+        logicSongSelector = new Spinner(this);
+        logicSongAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, new ArrayList<>());
+        logicSongAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        logicSongSelector.setAdapter(logicSongAdapter);
+        logicSongSelector.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (updatingLogicChartSelectors || position < 0 || position >= logicSongIds.size()) {
+                    return;
+                }
+                refreshLogicDifficultySelector(logicSongIds.get(position), true);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        root.addView(logicSongSelector, matchWrap());
+
+        TextView difficultyLabel = new TextView(this);
+        difficultyLabel.setText("\u96be\u5ea6");
+        difficultyLabel.setTextColor(COLOR_MUTED);
+        difficultyLabel.setTextSize(13f);
+        LinearLayout.LayoutParams difficultyLabelParams = matchWrap();
+        difficultyLabelParams.setMargins(0, dp(8), 0, dp(2));
+        root.addView(difficultyLabel, difficultyLabelParams);
+
+        logicDifficultySelector = new Spinner(this);
+        logicDifficultyAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, new ArrayList<>());
+        logicDifficultyAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        logicDifficultySelector.setAdapter(logicDifficultyAdapter);
+        logicDifficultySelector.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (updatingLogicChartSelectors || position < 0 || position >= logicDifficulties.size()) {
+                    return;
+                }
+                String songId = selectedLogicSongId();
+                if (AppSettings.selectLogicChart(MainActivity.this, songId, logicDifficulties.get(position))) {
+                    updateLogicChartUi();
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        root.addView(logicDifficultySelector, matchWrap());
+
+        LinearLayout buttonRow = new LinearLayout(this);
+        buttonRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button refresh = new Button(this);
+        refresh.setText("\u626b\u63cf\u5e76\u5237\u65b0\u8c31\u9762\u7d22\u5f15");
+        refresh.setAllCaps(false);
+        refresh.setOnClickListener(v -> {
+            int count = AppSettings.refreshLogicChartIndex(this);
+            refreshLogicChartSelectors();
+            statusView.setText(count > 0
+                    ? "\u72b6\u6001\uff1a\u5df2\u5237\u65b0 " + count + " \u4e2a\u8c31\u9762\u5e8f\u53f7"
+                    : "\u72b6\u6001\uff1a\u672a\u627e\u5230\u7b26\u5408\u547d\u540d\u89c4\u5219\u7684\u8c31\u9762\u6587\u4ef6");
+        });
+        buttonRow.addView(refresh, new LinearLayout.LayoutParams(0, dp(44), 1f));
+
+        Button apply = new Button(this);
+        apply.setText("\u5e94\u7528\u5f53\u524d\u8c31\u9762");
+        apply.setAllCaps(false);
+        apply.setOnClickListener(v -> {
+            String songId = selectedLogicSongId();
+            String difficulty = selectedLogicDifficulty();
+            if (AppSettings.selectLogicChart(this, songId, difficulty)) {
+                updateLogicChartUi();
+                statusView.setText("\u72b6\u6001\uff1a\u5df2\u5e94\u7528\u8c31\u9762 " + songId + " " + difficulty);
+            }
+        });
+        LinearLayout.LayoutParams applyParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        applyParams.setMargins(dp(8), 0, 0, 0);
+        buttonRow.addView(apply, applyParams);
+
+        LinearLayout.LayoutParams rowParams = matchWrap();
+        rowParams.setMargins(0, dp(8), 0, 0);
+        root.addView(buttonRow, rowParams);
+        refreshLogicChartSelectors();
+    }
+
+    private void refreshLogicChartSelectors() {
+        if (logicSongAdapter == null || logicDifficultyAdapter == null) {
+            return;
+        }
+        updatingLogicChartSelectors = true;
+        logicSongIds.clear();
+        logicSongIds.addAll(AppSettings.logicChartSongIds(this));
+        logicSongAdapter.clear();
+        for (String songId : logicSongIds) {
+            logicSongAdapter.add(songId);
+        }
+        logicSongAdapter.notifyDataSetChanged();
+
+        String selectedSongId = AppSettings.selectedLogicChartSongId(this);
+        int songIndex = Math.max(0, logicSongIds.indexOf(selectedSongId));
+        if (logicSongIds.isEmpty()) {
+            logicDifficulties.clear();
+            logicDifficultyAdapter.clear();
+            logicDifficultyAdapter.notifyDataSetChanged();
+            updatingLogicChartSelectors = false;
+            updateLogicChartUi();
+            return;
+        }
+        logicSongSelector.setSelection(songIndex, false);
+        refreshLogicDifficultySelector(logicSongIds.get(songIndex), false);
+        updatingLogicChartSelectors = false;
+        updateLogicChartUi();
+    }
+
+    private void refreshLogicDifficultySelector(String songId, boolean selectCurrent) {
+        if (logicDifficultyAdapter == null) {
+            return;
+        }
+        boolean wasUpdating = updatingLogicChartSelectors;
+        updatingLogicChartSelectors = true;
+        logicDifficulties.clear();
+        logicDifficulties.addAll(AppSettings.logicChartDifficulties(this, songId));
+        logicDifficultyAdapter.clear();
+        for (String difficulty : logicDifficulties) {
+            logicDifficultyAdapter.add(difficulty.toUpperCase(Locale.ROOT));
+        }
+        logicDifficultyAdapter.notifyDataSetChanged();
+        int difficultyIndex = logicDifficulties.indexOf(AppSettings.selectedLogicChartDifficulty(this));
+        if (difficultyIndex < 0) {
+            difficultyIndex = 0;
+        }
+        if (!logicDifficulties.isEmpty()) {
+            logicDifficultySelector.setSelection(difficultyIndex, false);
+            if (selectCurrent) {
+                AppSettings.selectLogicChart(this, songId, logicDifficulties.get(difficultyIndex));
+            }
+        }
+        updatingLogicChartSelectors = wasUpdating;
+        updateLogicChartUi();
+    }
+
+    private String selectedLogicSongId() {
+        int position = logicSongSelector == null ? -1 : logicSongSelector.getSelectedItemPosition();
+        return position >= 0 && position < logicSongIds.size()
+                ? logicSongIds.get(position)
+                : AppSettings.selectedLogicChartSongId(this);
+    }
+
+    private String selectedLogicDifficulty() {
+        int position = logicDifficultySelector == null ? -1 : logicDifficultySelector.getSelectedItemPosition();
+        return position >= 0 && position < logicDifficulties.size()
+                ? logicDifficulties.get(position)
+                : AppSettings.selectedLogicChartDifficulty(this);
+    }
+
+    private void updateLogicChartUi() {
+        if (logicProfileView == null) {
+            return;
+        }
+        String songId = AppSettings.selectedLogicChartSongId(this);
+        String difficulty = AppSettings.selectedLogicChartDifficulty(this);
+        logicProfileView.setText(songId.isEmpty() || difficulty.isEmpty()
+                ? "\u5f53\u524d\u8c31\u9762\uff1a\u672a\u9009\u62e9"
+                : "\u5f53\u524d\u8c31\u9762\uff1a" + songId + "  " + difficulty.toUpperCase(Locale.ROOT));
+    }
+
+    /** Opens the exact same validated sequence/difficulty selectors used by the main screen. */
+    private void openLogicChartPicker(boolean openSongDropdown) {
+        setActivePage(1);
+        refreshLogicChartSelectors();
+        if (openSongDropdown && logicSongSelector != null && !logicSongIds.isEmpty()) {
+            logicSongSelector.postDelayed(logicSongSelector::performClick, 180);
+        }
+    }
+
+    private void addLegacyLogicProfileControls(LinearLayout root) {
+        AppSettings.importLogicProfilesFromDirectory(this);
+
+        TextView title = new TextView(this);
+        title.setText("\u903b\u8f91\u6f14\u594f");
+        title.setTextColor(COLOR_TEXT);
+        title.setTextSize(15f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.START);
+        LinearLayout.LayoutParams titleParams = matchWrap();
+        titleParams.setMargins(0, dp(12), 0, dp(2));
+        root.addView(title, titleParams);
+
+        logicProfileView = new TextView(this);
+        styleReadout(logicProfileView);
+        LinearLayout.LayoutParams logicProfileParams = matchWrap();
+        logicProfileParams.setMargins(0, 0, 0, dp(6));
+        root.addView(logicProfileView, logicProfileParams);
 
         TextView directory = new TextView(this);
         File logicDirectory = AppSettings.logicProfilesDirectory(this);
@@ -691,19 +990,19 @@ public final class MainActivity extends Activity {
     private void addCalibrationControls(LinearLayout root) {
         TextView title = new TextView(this);
         title.setText("判定点校准");
-        title.setTextColor(Color.rgb(20, 24, 32));
-        title.setTextSize(16f);
+        title.setTextColor(COLOR_TEXT);
+        title.setTextSize(15f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
+        title.setGravity(Gravity.START);
         LinearLayout.LayoutParams titleParams = matchWrap();
         titleParams.setMargins(0, dp(12), 0, dp(2));
         root.addView(title, titleParams);
 
         calibrationValueView = new TextView(this);
-        calibrationValueView.setTextColor(Color.rgb(45, 52, 64));
-        calibrationValueView.setTextSize(15f);
-        calibrationValueView.setGravity(Gravity.CENTER);
-        root.addView(calibrationValueView, matchWrap());
+        styleReadout(calibrationValueView);
+        LinearLayout.LayoutParams calibrationParams = matchWrap();
+        calibrationParams.setMargins(0, 0, 0, dp(4));
+        root.addView(calibrationValueView, calibrationParams);
 
         calibrationSeekBar = new SeekBar(this);
         calibrationSeekBar.setMax(AppSettings.ACTION_Y_MAX - AppSettings.ACTION_Y_MIN);
@@ -787,19 +1086,19 @@ public final class MainActivity extends Activity {
     private void addTouchMappingControls(LinearLayout root) {
         TextView title = new TextView(this);
         title.setText("点击映射");
-        title.setTextColor(Color.rgb(20, 24, 32));
-        title.setTextSize(16f);
+        title.setTextColor(COLOR_TEXT);
+        title.setTextSize(15f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
+        title.setGravity(Gravity.START);
         LinearLayout.LayoutParams titleParams = matchWrap();
         titleParams.setMargins(0, dp(12), 0, dp(2));
         root.addView(title, titleParams);
 
         touchMappingView = new TextView(this);
-        touchMappingView.setTextColor(Color.rgb(45, 52, 64));
-        touchMappingView.setTextSize(15f);
-        touchMappingView.setGravity(Gravity.CENTER);
-        root.addView(touchMappingView, matchWrap());
+        styleReadout(touchMappingView);
+        LinearLayout.LayoutParams touchMappingParams = matchWrap();
+        touchMappingParams.setMargins(0, 0, 0, dp(6));
+        root.addView(touchMappingView, touchMappingParams);
 
         Button cycle = new Button(this);
         cycle.setText("切换点击映射");
@@ -826,19 +1125,19 @@ public final class MainActivity extends Activity {
     private void addNoteModelControls(LinearLayout root) {
         TextView title = new TextView(this);
         title.setText("音符识别模型");
-        title.setTextColor(Color.rgb(20, 24, 32));
-        title.setTextSize(16f);
+        title.setTextColor(COLOR_TEXT);
+        title.setTextSize(15f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
+        title.setGravity(Gravity.START);
         LinearLayout.LayoutParams titleParams = matchWrap();
         titleParams.setMargins(0, dp(12), 0, dp(2));
         root.addView(title, titleParams);
 
         noteModelView = new TextView(this);
-        noteModelView.setTextColor(Color.rgb(45, 52, 64));
-        noteModelView.setTextSize(15f);
-        noteModelView.setGravity(Gravity.CENTER);
-        root.addView(noteModelView, matchWrap());
+        styleReadout(noteModelView);
+        LinearLayout.LayoutParams noteModelParams = matchWrap();
+        noteModelParams.setMargins(0, 0, 0, dp(6));
+        root.addView(noteModelView, noteModelParams);
 
         Button cycle = new Button(this);
         cycle.setText("切换音符模型");
@@ -861,6 +1160,173 @@ public final class MainActivity extends Activity {
         }
         int mode = AppSettings.getNoteModelMode(this);
         noteModelView.setText("当前模型：" + AppSettings.noteModelLabel(mode));
+    }
+
+    private void addOverlayCustomActionControls(LinearLayout root) {
+        TextView title = new TextView(this);
+        title.setText("\u5c0f\u7a97\u53e3\u81ea\u5b9a\u4e49\u6309\u94ae");
+        title.setTextColor(COLOR_TEXT);
+        title.setTextSize(15f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.START);
+        LinearLayout.LayoutParams titleParams = matchWrap();
+        titleParams.setMargins(0, dp(12), 0, dp(2));
+        root.addView(title, titleParams);
+
+        customOverlayActionView = new TextView(this);
+        styleReadout(customOverlayActionView);
+        LinearLayout.LayoutParams actionParams = matchWrap();
+        actionParams.setMargins(0, 0, 0, dp(6));
+        root.addView(customOverlayActionView, actionParams);
+
+        Button cycle = new Button(this);
+        cycle.setText("\u5207\u6362\u81ea\u5b9a\u4e49\u64cd\u4f5c");
+        cycle.setAllCaps(false);
+        cycle.setOnClickListener(v -> {
+            int action = AppSettings.nextOverlayCustomAction(this);
+            updateOverlayCustomActionUi();
+            refreshOverlayCustomAction();
+            statusView.setText("\u72b6\u6001\uff1a\u5c0f\u7a97\u53e3\u81ea\u5b9a\u4e49\u6309\u94ae\u5df2\u8bbe\u4e3a "
+                    + AppSettings.overlayCustomActionLabel(action));
+        });
+        root.addView(cycle, buttonParams());
+
+        updateOverlayCustomActionUi();
+    }
+
+    private void updateOverlayCustomActionUi() {
+        if (customOverlayActionView == null) {
+            return;
+        }
+        customOverlayActionView.setText("\u5f53\u524d\u81ea\u5b9a\u4e49\uff1a"
+                + AppSettings.overlayCustomActionLabel(AppSettings.getOverlayCustomAction(this)));
+    }
+
+    /** Main-screen counterparts for every runtime control exposed by the overlay. */
+    private void addOverlayRuntimeControls(LinearLayout root) {
+        TextView title = new TextView(this);
+        title.setText("\u5c0f\u7a97\u53e3\u8fd0\u884c\u63a7\u5236");
+        title.setTextColor(COLOR_TEXT);
+        title.setTextSize(15f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        LinearLayout.LayoutParams titleParams = matchWrap();
+        titleParams.setMargins(0, dp(12), 0, dp(4));
+        root.addView(title, titleParams);
+
+        overlayRuntimeStateView = new TextView(this);
+        styleReadout(overlayRuntimeStateView);
+        LinearLayout.LayoutParams runtimeStateParams = matchWrap();
+        runtimeStateParams.setMargins(0, 0, 0, dp(6));
+        root.addView(overlayRuntimeStateView, runtimeStateParams);
+        updateOverlayRuntimeStateUi();
+
+        addOverlayRuntimeButton(root, "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3",
+                CaptureService.ACTION_TOGGLE_OVERLAY_VISIBILITY);
+        addOverlayRuntimeButton(root, "\u6298\u53e0/\u5c55\u5f00\u5c0f\u7a97\u53e3",
+                CaptureService.ACTION_TOGGLE_OVERLAY_COLLAPSE);
+        addOverlayRuntimeButton(root, "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3\u53c2\u6570",
+                CaptureService.ACTION_TOGGLE_OVERLAY_PARAMETERS);
+        addOverlayRuntimeButton(root, "\u91cd\u7f6e\u8fd0\u884c\u72b6\u6001",
+                CaptureService.ACTION_RESET_PLAYBACK);
+        addOverlayRuntimeButton(root, "\u5f00\u5173\u8c03\u8bd5\u663e\u793a",
+                CaptureService.ACTION_TOGGLE_DEBUG_DISPLAY);
+        addOverlayRuntimeButton(root, "\u5f00\u59cb/\u7ed3\u675f\u5f55\u5c4f",
+                CaptureService.ACTION_TOGGLE_SCREEN_RECORDING);
+    }
+
+    private void addOverlayRuntimeButton(LinearLayout root, String label, String action) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setOnClickListener(v -> {
+            if (!CaptureService.isRunning()) {
+                applyOverlayStartupPreference(action);
+                updateOverlayRuntimeStateUi();
+                return;
+            }
+            startService(new Intent(this, CaptureService.class).setAction(action));
+            button.postDelayed(this::updateOverlayRuntimeStateUi, 180L);
+        });
+        root.addView(button, buttonParams());
+    }
+
+    private void updateOverlayRuntimeStateUi() {
+        if (overlayRuntimeStateView == null) {
+            return;
+        }
+        boolean hidden = AppSettings.isOverlayHidden(this);
+        boolean collapsed = AppSettings.isOverlayCollapsed(this);
+        boolean parametersVisible = AppSettings.isOverlayParametersVisible(this);
+        boolean debugEnabled = AppSettings.isDebugDisplayEnabled(this);
+        String visibility = hidden ? "\u5df2\u9690\u85cf" : "\u5df2\u663e\u793a";
+        String shape = collapsed ? "\u5df2\u6298\u53e0" : "\u5df2\u5c55\u5f00";
+        overlayRuntimeStateView.setText("\u5f53\u524d\u5c0f\u7a97\u53e3\uff1a" + visibility
+                + "  |  " + shape
+                + "\n\u53c2\u6570\uff1a" + (parametersVisible ? "\u5df2\u663e\u793a" : "\u5df2\u9690\u85cf")
+                + "  |  \u8c03\u8bd5\uff1a" + (debugEnabled ? "\u5df2\u5f00\u542f" : "\u5df2\u5173\u95ed"));
+        int accent = hidden
+                ? Color.rgb(190, 92, 70)
+                : collapsed ? Color.rgb(184, 126, 55) : Color.rgb(33, 133, 91);
+        overlayRuntimeStateView.setTextColor(accent);
+        overlayRuntimeStateView.setBackground(makeRoundedBackground(
+                Color.rgb(246, 250, 252),
+                accent,
+                8));
+    }
+
+    /** Stores meaningful overlay choices even before the capture service exists. */
+    private void applyOverlayStartupPreference(String action) {
+        if (CaptureService.ACTION_TOGGLE_OVERLAY_VISIBILITY.equals(action)) {
+            boolean hidden = !AppSettings.isOverlayHidden(this);
+            AppSettings.setOverlayHidden(this, hidden);
+            statusView.setText(hidden
+                    ? "\u72b6\u6001\uff1a\u5df2\u8bbe\u4e3a\u542f\u52a8\u540e\u9690\u85cf\u5c0f\u7a97\u53e3"
+                    : "\u72b6\u6001\uff1a\u5df2\u8bbe\u4e3a\u542f\u52a8\u540e\u663e\u793a\u5c0f\u7a97\u53e3");
+            return;
+        }
+        if (CaptureService.ACTION_TOGGLE_OVERLAY_COLLAPSE.equals(action)) {
+            boolean collapsed = !AppSettings.isOverlayCollapsed(this);
+            AppSettings.setOverlayCollapsed(this, collapsed);
+            statusView.setText(collapsed
+                    ? "\u72b6\u6001\uff1a\u5df2\u8bbe\u4e3a\u542f\u52a8\u540e\u6298\u53e0\u5c0f\u7a97\u53e3"
+                    : "\u72b6\u6001\uff1a\u5df2\u8bbe\u4e3a\u542f\u52a8\u540e\u5c55\u5f00\u5c0f\u7a97\u53e3");
+            return;
+        }
+        if (CaptureService.ACTION_TOGGLE_OVERLAY_PARAMETERS.equals(action)) {
+            boolean visible = !AppSettings.isOverlayParametersVisible(this);
+            AppSettings.setOverlayParametersVisible(this, visible);
+            statusView.setText(visible
+                    ? "\u72b6\u6001\uff1a\u5df2\u8bbe\u4e3a\u542f\u52a8\u540e\u663e\u793a\u5c0f\u7a97\u53e3\u53c2\u6570"
+                    : "\u72b6\u6001\uff1a\u5df2\u8bbe\u4e3a\u542f\u52a8\u540e\u9690\u85cf\u5c0f\u7a97\u53e3\u53c2\u6570");
+            return;
+        }
+        if (CaptureService.ACTION_TOGGLE_DEBUG_DISPLAY.equals(action)) {
+            boolean enabled = !AppSettings.isDebugDisplayEnabled(this);
+            AppSettings.setDebugDisplayEnabled(this, enabled);
+            statusView.setText("\u72b6\u6001\uff1a\u6b63\u5728\u5e94\u7528\u8c03\u8bd5\u663e\u793a\u8bbe\u7f6e");
+            new Thread(() -> {
+                boolean success = DebugDisplayController.setEnabled(enabled);
+                runOnUiThread(() -> statusView.setText(success
+                        ? (enabled
+                                ? "\u72b6\u6001\uff1a\u5df2\u5f00\u542f\u8c03\u8bd5\u663e\u793a"
+                                : "\u72b6\u6001\uff1a\u5df2\u5173\u95ed\u8c03\u8bd5\u663e\u793a")
+                        : "\u72b6\u6001\uff1a\u8c03\u8bd5\u663e\u793a\u8bbe\u7f6e\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5 root \u6743\u9650"));
+            }, "pjsk-main-debug-display").start();
+            return;
+        }
+        if (CaptureService.ACTION_RESET_PLAYBACK.equals(action)) {
+            statusView.setText("\u72b6\u6001\uff1a\u4e0b\u6b21\u542f\u52a8\u5c06\u4ee5\u5e72\u51c0\u521d\u59cb\u72b6\u6001\u8fd0\u884c");
+            return;
+        }
+        statusView.setText("\u72b6\u6001\uff1a\u5f55\u5c4f\u9700\u5728\u91c7\u96c6\u670d\u52a1\u542f\u52a8\u540e\u624d\u80fd\u4f7f\u7528");
+    }
+
+    private void refreshOverlayCustomAction() {
+        if (!CaptureService.isRunning()) {
+            return;
+        }
+        startService(new Intent(this, CaptureService.class)
+                .setAction(CaptureService.ACTION_REFRESH_OVERLAY));
     }
 
     @Override
@@ -910,6 +1376,121 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void styleInteractiveViews(View view) {
+        if (view instanceof Button) {
+            styleButton((Button) view);
+        } else if (view instanceof Switch) {
+            Switch control = (Switch) view;
+            control.setTextColor(COLOR_TEXT);
+            control.setTextSize(14f);
+            control.setMinHeight(dp(48));
+            control.setPadding(dp(12), dp(6), dp(10), dp(6));
+            control.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 9));
+        } else if (view instanceof EditText) {
+            EditText input = (EditText) view;
+            input.setTextColor(COLOR_TEXT);
+            input.setHintTextColor(COLOR_MUTED);
+            input.setTextSize(14f);
+            input.setPadding(dp(12), dp(4), dp(12), dp(4));
+            input.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 8));
+        } else if (view instanceof Spinner) {
+            view.setPadding(dp(10), 0, dp(10), 0);
+            view.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 8));
+        }
+
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                styleInteractiveViews(group.getChildAt(index));
+            }
+        }
+    }
+
+    private LinearLayout createPage() {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setGravity(Gravity.CENTER_HORIZONTAL);
+        page.setPadding(0, dp(4), 0, 0);
+        return page;
+    }
+
+    private Button createPageTab(String label, int page) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTag(page == 0 ? "tab-active" : "tab");
+        button.setOnClickListener(view -> setActivePage(page));
+        return button;
+    }
+
+    private void setActivePage(int page) {
+        if (runPage == null || logicPage == null || debugPage == null) {
+            return;
+        }
+        runPage.setVisibility(page == 0 ? View.VISIBLE : View.GONE);
+        logicPage.setVisibility(page == 1 ? View.VISIBLE : View.GONE);
+        debugPage.setVisibility(page == 2 ? View.VISIBLE : View.GONE);
+        updatePageTab(runPageButton, page == 0);
+        updatePageTab(logicPageButton, page == 1);
+        updatePageTab(debugPageButton, page == 2);
+    }
+
+    private void updatePageTab(Button button, boolean active) {
+        if (button == null) {
+            return;
+        }
+        button.setTag(active ? "tab-active" : "tab");
+        styleButton(button);
+    }
+
+    private void styleReadout(TextView view) {
+        view.setTextColor(COLOR_TEXT);
+        view.setTextSize(14f);
+        view.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        view.setMinHeight(dp(42));
+        view.setPadding(dp(12), dp(6), dp(12), dp(6));
+        view.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 8));
+    }
+
+    private void styleButton(Button button) {
+        Object tag = button.getTag();
+        String variant = tag instanceof String ? (String) tag : "default";
+        int fill = COLOR_SURFACE;
+        int border = COLOR_BORDER;
+        int text = COLOR_TEXT;
+        if ("primary".equals(variant)) {
+            fill = COLOR_PRIMARY;
+            border = COLOR_PRIMARY;
+            text = Color.WHITE;
+        } else if ("danger".equals(variant)) {
+            fill = COLOR_DANGER;
+            border = COLOR_DANGER;
+            text = Color.WHITE;
+        } else if ("tab-active".equals(variant)) {
+            fill = COLOR_PRIMARY;
+            border = COLOR_PRIMARY;
+            text = Color.WHITE;
+        } else if ("tab".equals(variant)) {
+            fill = COLOR_SURFACE;
+            border = COLOR_BORDER;
+            text = COLOR_MUTED;
+        }
+        button.setTextColor(text);
+        button.setTextSize(14f);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setPadding(dp(10), 0, dp(10), 0);
+        button.setBackground(makeRoundedBackground(fill, border, 8));
+    }
+
+    private GradientDrawable makeRoundedBackground(int fillColor, int borderColor, int radiusDp) {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(fillColor);
+        background.setCornerRadius(dp(radiusDp));
+        background.setStroke(dp(1), borderColor);
+        return background;
+    }
+
     private LinearLayout.LayoutParams matchWrap() {
         return new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -922,6 +1503,23 @@ public final class MainActivity extends Activity {
                 dp(46));
         params.setMargins(0, dp(7), 0, 0);
         return params;
+    }
+
+    private LinearLayout.LayoutParams actionButtonParams(boolean hasRightMargin) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        params.setMargins(0, 0, hasRightMargin ? dp(8) : 0, 0);
+        return params;
+    }
+
+    private LinearLayout.LayoutParams pageTabParams(boolean hasRightMargin) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(40), 1f);
+        params.setMargins(0, 0, hasRightMargin ? dp(6) : 0, 0);
+        return params;
+    }
+
+    private int statusBarHeight() {
+        int resourceId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return resourceId == 0 ? 0 : getResources().getDimensionPixelSize(resourceId);
     }
 
     private int dp(int value) {

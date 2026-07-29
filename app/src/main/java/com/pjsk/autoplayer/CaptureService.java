@@ -26,9 +26,13 @@ import com.pjsk.autoplayer.ncnn.UiButtonDetector;
 import com.pjsk.autoplayer.overlay.DetectionPreviewOverlay;
 import com.pjsk.autoplayer.overlay.StatusOverlay;
 import com.pjsk.autoplayer.screen.ScreenCaptureSource;
+import com.pjsk.autoplayer.screen.RootScreenRecorder;
 import com.pjsk.autoplayer.settings.AppSettings;
 import com.pjsk.autoplayer.settings.DebugDisplayController;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -46,6 +50,13 @@ public final class CaptureService extends Service {
     public static final String ACTION_START = "com.pjsk.autoplayer.START";
     public static final String ACTION_STOP = "com.pjsk.autoplayer.STOP";
     public static final String ACTION_SET_PREVIEW = "com.pjsk.autoplayer.SET_PREVIEW";
+    public static final String ACTION_REFRESH_OVERLAY = "com.pjsk.autoplayer.REFRESH_OVERLAY";
+    public static final String ACTION_TOGGLE_OVERLAY_PARAMETERS = "com.pjsk.autoplayer.TOGGLE_OVERLAY_PARAMETERS";
+    public static final String ACTION_RESET_PLAYBACK = "com.pjsk.autoplayer.RESET_PLAYBACK";
+    public static final String ACTION_TOGGLE_DEBUG_DISPLAY = "com.pjsk.autoplayer.TOGGLE_DEBUG_DISPLAY";
+    public static final String ACTION_TOGGLE_SCREEN_RECORDING = "com.pjsk.autoplayer.TOGGLE_SCREEN_RECORDING";
+    public static final String ACTION_TOGGLE_OVERLAY_VISIBILITY = "com.pjsk.autoplayer.TOGGLE_OVERLAY_VISIBILITY";
+    public static final String ACTION_TOGGLE_OVERLAY_COLLAPSE = "com.pjsk.autoplayer.TOGGLE_OVERLAY_COLLAPSE";
     public static final String EXTRA_RESULT_CODE = "resultCode";
     public static final String EXTRA_RESULT_DATA = "resultData";
     public static final String EXTRA_PREVIEW_ENABLED = "previewEnabled";
@@ -71,6 +82,8 @@ public final class CaptureService extends Service {
     private final AtomicBoolean logicTimelineFinishPending = new AtomicBoolean(false);
     private final AtomicBoolean projectionRecoveryPending = new AtomicBoolean(false);
     private final AtomicBoolean captureTargetLaunchPending = new AtomicBoolean(false);
+    private final AtomicBoolean hiddenKeyMonitorRunning = new AtomicBoolean(false);
+    private final AtomicBoolean screenRecordingTogglePending = new AtomicBoolean(false);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Object metricsLock = new Object();
 
@@ -82,6 +95,9 @@ public final class CaptureService extends Service {
     private RootEventInjector injector;
     private StatusOverlay statusOverlay;
     private DetectionPreviewOverlay previewOverlay;
+    private final RootScreenRecorder screenRecorder = new RootScreenRecorder();
+    private volatile Process hiddenKeyMonitorProcess;
+    private volatile boolean overlaysHidden;
 
     private volatile int totalFrames;
     private volatile int totalDroppedFrames;
@@ -153,6 +169,59 @@ public final class CaptureService extends Service {
             return running ? START_STICKY : START_NOT_STICKY;
         }
 
+        if (ACTION_REFRESH_OVERLAY.equals(action)) {
+            refreshOverlayCustomButton();
+            return running ? START_STICKY : START_NOT_STICKY;
+        }
+
+        if (ACTION_TOGGLE_OVERLAY_PARAMETERS.equals(action)) {
+            boolean visible = !AppSettings.isOverlayParametersVisible(this);
+            AppSettings.setOverlayParametersVisible(this, visible);
+            if (statusOverlay != null) {
+                statusOverlay.applyLayoutPreferences(
+                        AppSettings.isOverlayCollapsed(this), visible);
+            }
+            return running ? START_STICKY : START_NOT_STICKY;
+        }
+
+        if (ACTION_RESET_PLAYBACK.equals(action)) {
+            resetPlaybackState();
+            return running ? START_STICKY : START_NOT_STICKY;
+        }
+
+        if (ACTION_TOGGLE_DEBUG_DISPLAY.equals(action)) {
+            toggleDebugDisplay();
+            return running ? START_STICKY : START_NOT_STICKY;
+        }
+
+        if (ACTION_TOGGLE_SCREEN_RECORDING.equals(action)) {
+            toggleScreenRecording();
+            return running ? START_STICKY : START_NOT_STICKY;
+        }
+
+        if (ACTION_TOGGLE_OVERLAY_VISIBILITY.equals(action)) {
+            if (!running) {
+                AppSettings.setOverlayHidden(this, !AppSettings.isOverlayHidden(this));
+                return START_NOT_STICKY;
+            }
+            if (overlaysHidden) {
+                restoreHiddenOverlays();
+            } else {
+                hideOverlays();
+            }
+            return running ? START_STICKY : START_NOT_STICKY;
+        }
+
+        if (ACTION_TOGGLE_OVERLAY_COLLAPSE.equals(action)) {
+            boolean collapsed = !AppSettings.isOverlayCollapsed(this);
+            AppSettings.setOverlayCollapsed(this, collapsed);
+            if (statusOverlay != null) {
+                statusOverlay.applyLayoutPreferences(
+                        collapsed, AppSettings.isOverlayParametersVisible(this));
+            }
+            return running ? START_STICKY : START_NOT_STICKY;
+        }
+
         if (ACTION_START.equals(action)) {
             int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
             Intent resultData = intent.getParcelableExtra(EXTRA_RESULT_DATA);
@@ -188,14 +257,19 @@ public final class CaptureService extends Service {
         autoPlayer = new AutoPlayer(injector, this::recordAction);
         updateAutoSoloRuntime(shouldRunAutoContinue());
         resetCounters();
+        overlaysHidden = AppSettings.isOverlayHidden(this);
         previousLogicPlayMode = AppSettings.isLogicPlayModeEnabled(this);
         if (previousLogicPlayMode) {
             forceLogicPlayWaitLoading(autoPlayer);
         }
         previousNoClickMode = AppSettings.isNoClickMode(this);
         clickResumeAtMs = 0L;
+        if (overlaysHidden) {
+            startHiddenKeyMonitor();
+        }
         showOverlay("启动中\n模型：" + detectorStatus);
         setPreviewEnabled(AppSettings.isPreviewEnabled(this));
+        applyDebugDisplaySetting();
 
         MediaProjectionManager manager =
                 (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
@@ -324,6 +398,19 @@ public final class CaptureService extends Service {
                 currentAutoContinueController = null;
             }
 
+            if (currentAutoPlayer.isLogicPlayActive()) {
+                if (currentAutoContinueController != null) {
+                    currentAutoContinueController.enterLogicPlaying();
+                    autoContinueStatus = currentAutoContinueController.statusText();
+                }
+                setLogicFrameDeliveryPaused(true);
+                handleLogicPlayFrame(frame, inferenceStartMs, currentAutoPlayer);
+                if (currentAutoPlayer.isLogicPlayFinished()) {
+                    finishLogicPlay(currentAutoPlayer, currentAutoContinueController);
+                }
+                return;
+            }
+
             if (currentAutoContinueController != null) {
                 updateClickMode(currentAutoPlayer);
                 // A logic timeline determines its own end. Do not run LIVE CLEAR image detection
@@ -355,15 +442,6 @@ public final class CaptureService extends Service {
                     handleAutoContinueFrame(frame, inferenceStartMs, currentAutoContinueController);
                     return;
                 }
-            }
-
-            if (currentAutoPlayer.isLogicPlayActive()) {
-                updateClickMode(currentAutoPlayer);
-                handleLogicPlayFrame(frame, inferenceStartMs, currentAutoPlayer);
-                if (currentAutoPlayer.isLogicPlayFinished()) {
-                    finishLogicPlay(currentAutoPlayer, currentAutoContinueController);
-                }
-                return;
             }
 
             long detectStartMs = SystemClock.elapsedRealtime();
@@ -400,6 +478,8 @@ public final class CaptureService extends Service {
                     && currentAutoPlayer.isLogicPlayActive()) {
                 currentAutoContinueController.enterLogicPlaying();
                 autoContinueStatus = currentAutoContinueController.statusText();
+                setLogicFrameDeliveryPaused(true);
+                publishAutoContinueStatusNow();
             }
             long actionMs = Math.max(0L, SystemClock.elapsedRealtime() - actionStartMs);
             long totalMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
@@ -515,6 +595,7 @@ public final class CaptureService extends Service {
     }
 
     private void forceLogicPlayWaitLoading(AutoPlayer currentAutoPlayer) {
+        setLogicFrameDeliveryPaused(false);
         AppSettings.setAutoSoloModeEnabled(this, true);
         updateAutoSoloRuntime(true);
         if (autoContinueController != null) {
@@ -536,8 +617,6 @@ public final class CaptureService extends Service {
         lastInferenceMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
         recordProcessedFrame();
         updateRuntimeStatus(0);
-        updatePreview(frame, Collections.emptyList(), lastInferenceMs, AppSettings.getActionY(this));
-
         long now = SystemClock.elapsedRealtime();
         if (now - lastDiagnosticsLogMs >= 1000) {
             lastDiagnosticsLogMs = now;
@@ -578,11 +657,13 @@ public final class CaptureService extends Service {
             AutoPlayer currentAutoPlayer,
             AutoContinueController currentAutoContinueController) {
         currentAutoPlayer.resetLogicPlayRuntime();
+        setLogicFrameDeliveryPaused(false);
         currentAutoPlayer.setClickEnabled(false);
         if (currentAutoContinueController != null) {
             currentAutoContinueController.forceGameEnded();
             autoContinueStatus = currentAutoContinueController.statusText();
         }
+        publishAutoContinueStatusNow();
         Log.i(TAG, "logic timeline completed, switching to game ended state");
     }
 
@@ -732,6 +813,7 @@ public final class CaptureService extends Service {
                 statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
                 statusOverlay.setLogicPlayMode(AppSettings.isLogicPlayModeEnabled(this));
                 statusOverlay.setAutoContinueStatus(autoContinueStatus);
+                statusOverlay.setScreenRecording(screenRecorder.isRecording());
             }
         }
 
@@ -742,6 +824,23 @@ public final class CaptureService extends Service {
                     "运行中 FPS %.1f 识别 %d",
                     currentFps,
                     detectionCount));
+        }
+    }
+
+    private void publishAutoContinueStatusNow() {
+        updateVisibleStatus(formatStatus(0), false);
+        if (statusOverlay != null) {
+            statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
+            statusOverlay.setLogicPlayMode(AppSettings.isLogicPlayModeEnabled(this));
+            statusOverlay.setAutoContinueStatus(autoContinueStatus);
+            statusOverlay.setScreenRecording(screenRecorder.isRecording());
+        }
+    }
+
+    private void setLogicFrameDeliveryPaused(boolean paused) {
+        ScreenCaptureSource source = captureSource;
+        if (source != null) {
+            source.setFrameDeliveryPaused(paused);
         }
     }
 
@@ -836,6 +935,9 @@ public final class CaptureService extends Service {
 
     private void stopEverything() {
         captureTargetLaunchPending.set(false);
+        overlaysHidden = false;
+        stopHiddenKeyMonitor();
+        screenRecorder.stop();
         releaseRuntime();
         running = false;
         if (previewOverlay != null) {
@@ -847,6 +949,60 @@ public final class CaptureService extends Service {
             statusOverlay = null;
         }
         updateNotification("已停止");
+    }
+
+    /**
+     * MediaSession volume routing is owned by the foreground game, so listen to the root input
+     * stream only while the overlay is hidden. This remains independent from logic playback.
+     */
+    private void startHiddenKeyMonitor() {
+        if (!hiddenKeyMonitorRunning.compareAndSet(false, true)) {
+            return;
+        }
+        Thread monitor = new Thread(() -> {
+            Process process = null;
+            try {
+                process = Runtime.getRuntime().exec(new String[]{"su", "-c", "getevent -ql"});
+                hiddenKeyMonitorProcess = process;
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(process.getInputStream()))) {
+                    String line;
+                    while (hiddenKeyMonitorRunning.get() && (line = reader.readLine()) != null) {
+                        if (!overlaysHidden || !line.contains(" DOWN")) {
+                            continue;
+                        }
+                        if (line.contains("KEY_VOLUMEUP")) {
+                            mainHandler.post(this::restoreHiddenOverlays);
+                            break;
+                        }
+                        if (line.contains("KEY_VOLUMEDOWN")) {
+                            mainHandler.post(this::stopAndTerminateApp);
+                            break;
+                        }
+                    }
+                }
+            } catch (IOException error) {
+                Log.w(TAG, "hidden overlay key monitor unavailable", error);
+            } finally {
+                if (hiddenKeyMonitorProcess == process) {
+                    hiddenKeyMonitorProcess = null;
+                }
+                if (process != null) {
+                    process.destroy();
+                }
+                hiddenKeyMonitorRunning.set(false);
+            }
+        }, "hidden-overlay-key-monitor");
+        monitor.start();
+    }
+
+    private void stopHiddenKeyMonitor() {
+        hiddenKeyMonitorRunning.set(false);
+        Process process = hiddenKeyMonitorProcess;
+        hiddenKeyMonitorProcess = null;
+        if (process != null) {
+            process.destroy();
+        }
     }
 
     /**
@@ -903,16 +1059,23 @@ public final class CaptureService extends Service {
     }
 
     private void showOverlay(String text) {
+        if (overlaysHidden) {
+            return;
+        }
         if (statusOverlay == null) {
             statusOverlay = new StatusOverlay(this, () -> {
                 stopAndTerminateApp();
-            }, () -> setPreviewEnabled(!AppSettings.isPreviewEnabled(this)),
+            }, this::hideOverlays,
+                    () -> setPreviewEnabled(!AppSettings.isPreviewEnabled(this)),
                     this::toggleNoClickMode,
                     this::toggleAutoSoloMode,
                     this::toggleLogicPlayMode,
                     this::switchLogicProfile,
                     this::resetPlaybackState,
-                    this::toggleDebugDisplay);
+                    this::toggleScreenRecording,
+                    this::runCustomOverlayAction,
+                    this::toggleDebugDisplay,
+                    this::syncPreviewPosition);
         }
         statusOverlay.show(text);
         statusOverlay.setPreviewEnabled(AppSettings.isPreviewEnabled(this));
@@ -921,7 +1084,69 @@ public final class CaptureService extends Service {
         statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
         statusOverlay.setLogicPlayMode(AppSettings.isLogicPlayModeEnabled(this));
         statusOverlay.setAutoContinueStatus(autoContinueStatus);
+        statusOverlay.setScreenRecording(screenRecorder.isRecording());
+        statusOverlay.applyLayoutPreferences(
+                AppSettings.isOverlayCollapsed(this),
+                AppSettings.isOverlayParametersVisible(this));
+        refreshOverlayCustomButton();
         statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
+    }
+
+    private void hideOverlays() {
+        overlaysHidden = true;
+        AppSettings.setOverlayHidden(this, true);
+        startHiddenKeyMonitor();
+        if (previewOverlay != null) {
+            previewOverlay.dismiss();
+            previewOverlay = null;
+        }
+        if (statusOverlay != null) {
+            statusOverlay.dismiss();
+            statusOverlay = null;
+        }
+    }
+
+    private void restoreHiddenOverlays() {
+        if (!running || !overlaysHidden) {
+            return;
+        }
+        overlaysHidden = false;
+        AppSettings.setOverlayHidden(this, false);
+        stopHiddenKeyMonitor();
+        showOverlay(formatStatus(0));
+        if (AppSettings.isPreviewEnabled(this)) {
+            setPreviewEnabled(true);
+        }
+    }
+
+    private void toggleScreenRecording() {
+        if (!screenRecordingTogglePending.compareAndSet(false, true)) {
+            return;
+        }
+        Thread recordingToggle = new Thread(() -> {
+            try {
+                String message;
+                if (screenRecorder.isRecording()) {
+                    String savedPath = screenRecorder.stop();
+                    message = savedPath == null
+                            ? "录屏未运行"
+                            : "录屏已保存：" + savedPath;
+                } else {
+                    String outputPath = screenRecorder.start();
+                    message = "正在录屏：" + outputPath;
+                }
+                updateNotification(message);
+            } catch (Exception error) {
+                Log.e(TAG, "failed to toggle root screen recording", error);
+                updateNotification("录屏失败：" + error.getMessage());
+            } finally {
+                screenRecordingTogglePending.set(false);
+                if (statusOverlay != null) {
+                    statusOverlay.setScreenRecording(screenRecorder.isRecording());
+                }
+            }
+        }, "pjsk-screenrecord-toggle");
+        recordingToggle.start();
     }
 
     private void toggleNoClickMode() {
@@ -961,6 +1186,7 @@ public final class CaptureService extends Service {
             previousLogicPlayMode = true;
         } else {
             previousLogicPlayMode = false;
+            setLogicFrameDeliveryPaused(false);
         }
         if (currentAutoPlayer != null) {
             updateLogicPlayRuntime(currentAutoPlayer);
@@ -973,18 +1199,17 @@ public final class CaptureService extends Service {
         updateNotification(enabled ? "\u5df2\u5f00\u542f\u903b\u8f91\u6f14\u594f\u6a21\u5f0f\uff0c\u7b49\u5f85 LIFE \u52a0\u8f7d" : "\u5df2\u5173\u95ed\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
     }
 
-    /** Cycles the selected JSON without restarting the capture service. */
+    /** Applies the chart selected from the overlay's validated sequence/difficulty controls. */
     private void switchLogicProfile() {
-        // ADB may have copied new JSON files while the service was already running.
-        AppSettings.importLogicProfilesFromDirectory(this);
-        String label = AppSettings.nextLogicProfile(this);
+        String label = AppSettings.reloadSelectedLogicChart(this);
         lastLogicConfigRefreshMs = Long.MIN_VALUE;
         AutoPlayer currentAutoPlayer = autoPlayer;
         if (currentAutoPlayer != null) {
             updateLogicPlayRuntime(currentAutoPlayer);
             currentAutoPlayer.resetLogicPlayRuntime();
         }
-        String message = "\u5df2\u5207\u6362\u903b\u8f91 JSON\uff1a" + label;
+        setLogicFrameDeliveryPaused(false);
+        String message = "\u5df2\u5e94\u7528\u8c31\u9762\uff1a" + label;
         if (statusOverlay != null) {
             statusOverlay.updateStatus(message);
         }
@@ -992,9 +1217,14 @@ public final class CaptureService extends Service {
     }
 
     private void resetPlaybackState() {
+        // A reset must also resume frame delivery. Otherwise resetting while a logic
+        // timeline is active leaves the state machine waiting forever without frames.
+        setLogicFrameDeliveryPaused(false);
+        lastLogicConfigRefreshMs = Long.MIN_VALUE;
         AutoPlayer currentAutoPlayer = autoPlayer;
         if (currentAutoPlayer != null) {
             currentAutoPlayer.resetLogicPlayRuntime();
+            currentAutoPlayer.setClickEnabled(false);
         }
 
         if (shouldRunAutoContinue()) {
@@ -1014,8 +1244,54 @@ public final class CaptureService extends Service {
         if (statusOverlay != null) {
             statusOverlay.setAutoContinueStatus(autoContinueStatus);
         }
+        publishAutoContinueStatusNow();
         updateNotification("\u5df2\u91cd\u7f6e\u8fd0\u884c\u72b6\u6001\uff1a" + autoContinueStatus);
         Log.i(TAG, "playback state reset to " + autoContinueStatus);
+    }
+
+    private void refreshOverlayCustomButton() {
+        if (statusOverlay == null) {
+            return;
+        }
+        int action = AppSettings.getOverlayCustomAction(this);
+        statusOverlay.setCustomButton(
+                AppSettings.overlayCustomActionLabel(action),
+                action != AppSettings.OVERLAY_CUSTOM_NONE);
+    }
+
+    private void runCustomOverlayAction() {
+        switch (AppSettings.getOverlayCustomAction(this)) {
+            case AppSettings.OVERLAY_CUSTOM_PREVIEW:
+                setPreviewEnabled(!AppSettings.isPreviewEnabled(this));
+                return;
+            case AppSettings.OVERLAY_CUSTOM_NO_CLICK:
+                toggleNoClickMode();
+                return;
+            case AppSettings.OVERLAY_CUSTOM_AUTO_SOLO:
+                toggleAutoSoloMode();
+                return;
+            case AppSettings.OVERLAY_CUSTOM_LOGIC_PLAY:
+                toggleLogicPlayMode();
+                return;
+            case AppSettings.OVERLAY_CUSTOM_SWITCH_LOGIC:
+                switchLogicProfile();
+                return;
+            case AppSettings.OVERLAY_CUSTOM_RESET_STATE:
+                resetPlaybackState();
+                return;
+            case AppSettings.OVERLAY_CUSTOM_DEBUG_DISPLAY:
+                toggleDebugDisplay();
+                return;
+            case AppSettings.OVERLAY_CUSTOM_SCREEN_RECORD:
+                toggleScreenRecording();
+                return;
+            case AppSettings.OVERLAY_CUSTOM_STOP:
+                stopAndTerminateApp();
+                return;
+            case AppSettings.OVERLAY_CUSTOM_NONE:
+            default:
+                return;
+        }
     }
 
     private void toggleDebugDisplay() {
@@ -1034,10 +1310,20 @@ public final class CaptureService extends Service {
         }, "pjsk-debug-display").start();
     }
 
+    private void applyDebugDisplaySetting() {
+        final boolean enabled = AppSettings.isDebugDisplayEnabled(this);
+        new Thread(() -> DebugDisplayController.setEnabled(enabled),
+                "pjsk-apply-debug-display").start();
+    }
+
     private void setPreviewEnabled(boolean enabled) {
         AppSettings.setPreviewEnabled(this, enabled);
         if (statusOverlay != null) {
             statusOverlay.setPreviewEnabled(enabled);
+        }
+
+        if (overlaysHidden) {
+            return;
         }
 
         if (!enabled) {
@@ -1056,10 +1342,26 @@ public final class CaptureService extends Service {
         if (previewOverlay == null) {
             previewOverlay = new DetectionPreviewOverlay(this, () -> setPreviewEnabled(false));
         }
+        syncPreviewPosition();
         previewOverlay.show();
     }
 
+    private void syncPreviewPosition() {
+        DetectionPreviewOverlay overlay = previewOverlay;
+        StatusOverlay status = statusOverlay;
+        if (overlay == null || status == null) {
+            return;
+        }
+        overlay.setAnchorPosition(status.adjacentWindowX(), status.windowY());
+    }
+
     private void updateVisibleStatus(String text, boolean alsoNotification) {
+        if (overlaysHidden) {
+            if (alsoNotification) {
+                updateNotification(text.replace('\n', ' '));
+            }
+            return;
+        }
         if (statusOverlay == null || !statusOverlay.isShown()) {
             showOverlay(text);
         } else {
