@@ -15,8 +15,10 @@ public final class AutoContinueController {
     private static final String TAG = "PJSK-AutoContinue";
 
     public static final String STATUS_PLAYING = "演奏乐曲";
+    public static final String STATUS_LOGIC_PLAYING = "逻辑演奏";
     public static final String STATUS_GAME_ENDED = "游戏结束";
     public static final String STATUS_SELECT_SONG = "选择歌曲";
+    public static final String STATUS_WAIT_LOADING = "等待加载";
 
     private static final int TOUCH_ID = 9;
 
@@ -27,8 +29,10 @@ public final class AutoContinueController {
     private static final long BUTTON_TAP_REPEAT_MS = 500;
     private static final long PLAY_WAIT_TIMEOUT_MS = 2000;
     private static final long PLAY_BUTTON_GONE_CONFIRM_MS = 2000;
-    private static final long STARTING_SUPPRESS_MS = 2500;
     private static final long GAME_END_AFTER_START_GUARD_MS = 10000;
+    // 判定轨道会早于第一颗音符出现。留出加载动画保护时间，避免加载页误检提前启动逻辑谱面。
+    // The judgement track is sampled on every captured frame while loading.
+    private static final int TRACK_CONFIRMATION_COUNT = 3;
 
     private static final double RESULT_CONTINUE_X = 1700.0 / 1920.0;
     private static final double RESULT_CONTINUE_Y = 800.0 / 887.0;
@@ -46,6 +50,9 @@ public final class AutoContinueController {
     private long liveClearBlockedUntilMs;
     private long lastNoteSeenMs;
     private long lastPlayButtonSeenMs;
+    private int trackConfirmationCount;
+    // 刚从等待加载确认进入演奏。CaptureService 会消费该标志，确保首帧不直接启动逻辑时间轴。
+    private boolean enteredPlayingFromLoading;
     private List<Detection> lastButtonDetections = Collections.emptyList();
 
     public AutoContinueController(TouchInjector injector, UiButtonDetector buttonDetector) {
@@ -62,19 +69,89 @@ public final class AutoContinueController {
         liveClearBlockedUntilMs = 0L;
         lastNoteSeenMs = 0L;
         lastPlayButtonSeenMs = 0L;
+        trackConfirmationCount = 0;
+        enteredPlayingFromLoading = false;
         lastButtonDetections = Collections.emptyList();
+    }
+
+    public void forceGameEnded() {
+        state = State.GAME_ENDED;
+        lastDetectMs = 0L;
+        lastTapMs = 0L;
+        waitUntilMs = 0L;
+        playWaitStartMs = 0L;
+        liveClearBlockedUntilMs = 0L;
+        lastNoteSeenMs = 0L;
+        lastPlayButtonSeenMs = 0L;
+        trackConfirmationCount = 0;
+        enteredPlayingFromLoading = false;
+        lastButtonDetections = Collections.emptyList();
+        Log.i(TAG, "forced game ended state");
+    }
+
+    /**
+     * 逻辑演奏从已进入谱面加载流程的场景启动：预热模型，但在轨道出现前不执行音符操作。
+     */
+    public void forceWaitLoading() {
+        state = State.WAIT_LOADING;
+        lastDetectMs = 0L;
+        lastTapMs = 0L;
+        waitUntilMs = 0L;
+        playWaitStartMs = 0L;
+        liveClearBlockedUntilMs = 0L;
+        lastNoteSeenMs = 0L;
+        lastPlayButtonSeenMs = 0L;
+        trackConfirmationCount = 0;
+        enteredPlayingFromLoading = false;
+        lastButtonDetections = Collections.emptyList();
+        Log.i(TAG, "forced waiting for judgement track state");
     }
 
     public boolean shouldSuppressGameRecognition() {
         return state != State.PLAYING;
     }
 
+    /**
+     * 轨道出现只说明进入了演奏加载页，不足以开始逻辑时间轴。
+     * 逻辑模式会先进入此状态，再由 CaptureService 用第一颗触线音符确认真正开局。
+     */
+    public void waitForFirstLogicNote() {
+        lastDetectMs = 0L;
+        lastButtonDetections = Collections.emptyList();
+        Log.i(TAG, "playing state entered; logic timeline waits for first note");
+    }
+
+    /** Called only after a real note reaches the judgement line and starts the timeline. */
+    public void enterLogicPlaying() {
+        if (state == State.PLAYING) {
+            state = State.LOGIC_PLAYING;
+            lastButtonDetections = Collections.emptyList();
+            Log.i(TAG, "first logic note detected; switching to logic performance");
+        }
+    }
+
+    /**
+     * 返回一次性状态迁移信号。判定轨道确认的同一帧不能拿去启动逻辑演奏，
+     * 否则加载画面的残留识别结果可能会被当作第一颗音符。
+     */
+    public boolean consumeEnteredPlayingFromLoading() {
+        boolean entered = enteredPlayingFromLoading;
+        enteredPlayingFromLoading = false;
+        return entered;
+    }
+
     public String statusText() {
-        if (state == State.PLAYING || state == State.STARTING) {
+        if (state == State.PLAYING) {
             return STATUS_PLAYING;
+        }
+        if (state == State.LOGIC_PLAYING) {
+            return STATUS_LOGIC_PLAYING;
         }
         if (state == State.GAME_ENDED) {
             return STATUS_GAME_ENDED;
+        }
+        if (state == State.WAIT_LOADING) {
+            return STATUS_WAIT_LOADING;
         }
         return STATUS_SELECT_SONG;
     }
@@ -92,7 +169,12 @@ public final class AutoContinueController {
             int displayHeight,
             boolean clickBlocked,
             List<Detection> noteDetections) {
-        if (clickBlocked || frame == null || frame.isRecycled()) {
+        if (frame == null || frame.isRecycled()) {
+            return;
+        }
+        // Waiting for the gameplay HUD never injects input, so keep this state detector
+        // alive during no-click mode and the five-second click-resume delay.
+        if (clickBlocked && state != State.WAIT_LOADING) {
             return;
         }
 
@@ -122,13 +204,23 @@ public final class AutoContinueController {
                 handleSongSelect(frame, displayWidth, displayHeight, now);
                 break;
 
-            case State.STARTING:
-                if (now >= waitUntilMs) {
+            case State.WAIT_LOADING:
+                lastButtonDetections = Collections.emptyList();
+                if (isJudgementTrackVisible(frame)) {
+                    trackConfirmationCount++;
+                } else {
+                    trackConfirmationCount = 0;
+                }
+                if (trackConfirmationCount >= TRACK_CONFIRMATION_COUNT) {
                     state = State.PLAYING;
                     lastTapMs = 0L;
                     waitUntilMs = 0L;
                     playWaitStartMs = 0L;
-                    Log.i(TAG, "resumed playing after start guard");
+                    lastPlayButtonSeenMs = 0L;
+                    trackConfirmationCount = 0;
+                    enteredPlayingFromLoading = true;
+                    liveClearBlockedUntilMs = now + GAME_END_AFTER_START_GUARD_MS;
+                    Log.i(TAG, "judgement track detected, switching to playing");
                 }
                 break;
         }
@@ -189,12 +281,11 @@ public final class AutoContinueController {
         if (state == State.WAIT_PLAY) {
             if (lastPlayButtonSeenMs > 0L
                     && now - lastPlayButtonSeenMs >= PLAY_BUTTON_GONE_CONFIRM_MS) {
-                state = State.STARTING;
-                waitUntilMs = now + STARTING_SUPPRESS_MS;
-                liveClearBlockedUntilMs = waitUntilMs + GAME_END_AFTER_START_GUARD_MS;
+                state = State.WAIT_LOADING;
+                waitUntilMs = 0L;
                 playWaitStartMs = 0L;
                 lastPlayButtonSeenMs = 0L;
-                Log.i(TAG, "play button disappeared for 2s after tap, switching to playing");
+                Log.i(TAG, "play button disappeared for 2s after tap, waiting for judgement track");
             }
             return;
         }
@@ -211,10 +302,14 @@ public final class AutoContinueController {
     }
 
     private long detectionIntervalMs() {
+        if (state == State.WAIT_LOADING) {
+            return 0L;
+        }
         return state == State.PLAYING
                 ? PLAYING_DETECTION_INTERVAL_MS
                 : ACTIVE_DETECTION_INTERVAL_MS;
     }
+
 
     private void tapDetection(
             String reason,
@@ -257,6 +352,15 @@ public final class AutoContinueController {
                 && darkRatio(frame, 0.505, 0.235, 0.655, 0.435) < 0.10;
     }
 
+    /**
+     * The gameplay lane has two long purple horizontal edges near the judgement area.
+     * Unlike the HUD, this geometry is stable across backgrounds and song jackets.
+     */
+    private boolean isJudgementTrackVisible(Bitmap frame) {
+        return hasPurpleHorizontalLine(frame, 0.742, 0.772, 0.15, 0.85, 0.35)
+                && hasPurpleHorizontalLine(frame, 0.810, 0.840, 0.15, 0.85, 0.35);
+    }
+
     private double whiteRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
         return ratio(frame, x1, y1, x2, y2, PixelTest.WHITE);
     }
@@ -267,6 +371,34 @@ public final class AutoContinueController {
 
     private double greenRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
         return ratio(frame, x1, y1, x2, y2, PixelTest.GREEN);
+    }
+
+    private boolean hasPurpleHorizontalLine(
+            Bitmap frame, double y1, double y2, double x1, double x2, double minRatio) {
+        int width = frame.getWidth();
+        int height = frame.getHeight();
+        int left = clamp((int) Math.round(x1 * width), 0, width - 1);
+        int right = clamp((int) Math.round(x2 * width), left + 1, width);
+        int top = clamp((int) Math.round(y1 * height), 0, height - 1);
+        int bottom = clamp((int) Math.round(y2 * height), top + 1, height);
+        for (int y = top; y < bottom; y++) {
+            int matched = 0;
+            int total = 0;
+            for (int x = left; x < right; x += 2) {
+                int color = frame.getPixel(x, y);
+                int r = (color >> 16) & 0xff;
+                int g = (color >> 8) & 0xff;
+                int b = color & 0xff;
+                total++;
+                if (PixelTest.TRACK_PURPLE.matches(r, g, b)) {
+                    matched++;
+                }
+            }
+            if (total > 0 && matched / (double) total >= minRatio) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private double darkRatio(Bitmap frame, double x1, double y1, double x2, double y2) {
@@ -306,6 +438,7 @@ public final class AutoContinueController {
         PixelTest WHITE = (r, g, b) -> r > 210 && g > 210 && b > 210;
         PixelTest CYAN = (r, g, b) -> g > 130 && b > 130 && r < 200;
         PixelTest GREEN = (r, g, b) -> g > 150 && b > 120 && r < 190;
+        PixelTest TRACK_PURPLE = (r, g, b) -> r > 90 && b > 140 && r > g + 8 && b > g + 35;
         PixelTest DARK = (r, g, b) -> r < 95 && g < 95 && b < 130;
 
         boolean matches(int r, int g, int b);
@@ -316,7 +449,8 @@ public final class AutoContinueController {
         static final int GAME_ENDED = 1;
         static final int SELECT_SONG = 2;
         static final int WAIT_PLAY = 3;
-        static final int STARTING = 4;
+        static final int WAIT_LOADING = 4;
+        static final int LOGIC_PLAYING = 5;
 
         private State() {
         }

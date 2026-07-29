@@ -30,6 +30,9 @@ public final class StatusOverlay {
     private final Runnable onPreviewClick;
     private final Runnable onNoClickClick;
     private final Runnable onAutoSoloClick;
+    private final Runnable onLogicPlayClick;
+    private final Runnable onLogicProfileClick;
+    private final Runnable onResetStateClick;
     private final Runnable onDebugDisplayClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -46,11 +49,15 @@ public final class StatusOverlay {
     private Button previewButton;
     private Button noClickButton;
     private Button autoSoloButton;
+    private Button logicPlayButton;
+    private Button logicProfileButton;
+    private Button resetStateButton;
     private Button debugDisplayButton;
     private boolean collapsed;
     private boolean parametersVisible;
     private boolean clickBlocked;
     private boolean autoSoloMode;
+    private boolean logicPlayMode;
     private String autoContinueStatus = AutoContinueController.STATUS_PLAYING;
 
     private int startX;
@@ -64,12 +71,18 @@ public final class StatusOverlay {
             Runnable onPreviewClick,
             Runnable onNoClickClick,
             Runnable onAutoSoloClick,
+            Runnable onLogicPlayClick,
+            Runnable onLogicProfileClick,
+            Runnable onResetStateClick,
             Runnable onDebugDisplayClick) {
         this.context = context.getApplicationContext();
         this.onStopClick = onStopClick;
         this.onPreviewClick = onPreviewClick;
         this.onNoClickClick = onNoClickClick;
         this.onAutoSoloClick = onAutoSoloClick;
+        this.onLogicPlayClick = onLogicPlayClick;
+        this.onLogicProfileClick = onLogicProfileClick;
+        this.onResetStateClick = onResetStateClick;
         this.onDebugDisplayClick = onDebugDisplayClick;
     }
 
@@ -116,6 +129,19 @@ public final class StatusOverlay {
                 autoSoloButton.setText(enabled ? "单人开" : "单人关");
                 autoSoloButton.setTextColor(enabled
                         ? Color.rgb(94, 232, 142)
+                        : Color.rgb(255, 194, 87));
+            }
+        });
+    }
+
+
+    public void setLogicPlayMode(boolean enabled) {
+        mainHandler.post(() -> {
+            logicPlayMode = enabled;
+            if (logicPlayButton != null) {
+                logicPlayButton.setText(enabled ? "\u903b\u8f91\u5f00" : "\u903b\u8f91\u5173");
+                logicPlayButton.setTextColor(enabled
+                        ? Color.rgb(126, 214, 255)
                         : Color.rgb(255, 194, 87));
             }
         });
@@ -294,15 +320,32 @@ public final class StatusOverlay {
         detailsButton.setOnClickListener(v -> setParametersVisible(!parametersVisible));
         secondRow.addView(detailsButton, makeGridButtonParams(true));
 
-        debugDisplayButton = makeSmallButton("调试显示");
-        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
-        secondRow.addView(debugDisplayButton, makeGridButtonParams(true));
+        logicPlayButton = makeSmallButton("\u903b\u8f91\u5173");
+        logicPlayButton.setOnClickListener(v -> onLogicPlayClick.run());
+        secondRow.addView(logicPlayButton, makeGridButtonParams(true));
+        setLogicPlayMode(logicPlayMode);
 
-        Button stop = makeSmallButton("停止");
-        stop.setOnClickListener(v -> onStopClick.run());
-        secondRow.addView(stop, makeGridButtonParams(false));
+        debugDisplayButton = makeSmallButton("\u8c03\u8bd5\u663e\u793a");
+        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
+        secondRow.addView(debugDisplayButton, makeGridButtonParams(false));
 
         contentView.addView(secondRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout thirdRow = makeButtonRow();
+        resetStateButton = makeSmallButton("\u91cd\u7f6e\u72b6\u6001");
+        resetStateButton.setOnClickListener(v -> onResetStateClick.run());
+        thirdRow.addView(resetStateButton, makeGridButtonParams(true));
+
+        logicProfileButton = makeSmallButton("\u6362\u8c31");
+        logicProfileButton.setOnClickListener(v -> onLogicProfileClick.run());
+        thirdRow.addView(logicProfileButton, makeGridButtonParams(true));
+
+        Button stop = makeSmallButton("\u505c\u6b62");
+        stop.setOnClickListener(v -> onStopClick.run());
+        thirdRow.addView(stop, makeGridButtonParams(false));
+        contentView.addView(thirdRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         root.addView(contentView, new LinearLayout.LayoutParams(
@@ -376,6 +419,8 @@ public final class StatusOverlay {
                 color = Color.rgb(255, 194, 87);
             } else if (AutoContinueController.STATUS_SELECT_SONG.equals(autoContinueStatus)) {
                 color = Color.rgb(126, 214, 255);
+            } else if (AutoContinueController.STATUS_WAIT_LOADING.equals(autoContinueStatus)) {
+                color = Color.rgb(215, 169, 255);
             } else if (clickBlocked) {
                 color = Color.rgb(255, 102, 102);
             } else {
@@ -397,6 +442,9 @@ public final class StatusOverlay {
         } else if (AutoContinueController.STATUS_SELECT_SONG.equals(autoContinueStatus)) {
             textColor = Color.rgb(126, 214, 255);
             backgroundColor = Color.argb(80, 76, 169, 255);
+        } else if (AutoContinueController.STATUS_WAIT_LOADING.equals(autoContinueStatus)) {
+            textColor = Color.rgb(215, 169, 255);
+            backgroundColor = Color.argb(80, 164, 96, 210);
         } else {
             textColor = Color.rgb(94, 232, 142);
             backgroundColor = Color.argb(80, 64, 200, 118);
@@ -461,6 +509,9 @@ public final class StatusOverlay {
         previewButton = null;
         noClickButton = null;
         autoSoloButton = null;
+        logicPlayButton = null;
+        logicProfileButton = null;
+        resetStateButton = null;
         debugDisplayButton = null;
         params = null;
         parametersVisible = false;

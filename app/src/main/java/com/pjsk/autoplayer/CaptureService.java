@@ -11,7 +11,9 @@ import android.content.pm.ServiceInfo;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 
@@ -28,12 +30,15 @@ import com.pjsk.autoplayer.settings.AppSettings;
 import com.pjsk.autoplayer.settings.DebugDisplayController;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -44,6 +49,7 @@ public final class CaptureService extends Service {
     public static final String EXTRA_RESULT_CODE = "resultCode";
     public static final String EXTRA_RESULT_DATA = "resultData";
     public static final String EXTRA_PREVIEW_ENABLED = "previewEnabled";
+    public static final String EXTRA_LAUNCH_CAPTURE_TARGET = "launchCaptureTarget";
 
     private static final String TAG = "PJSK-CaptureService";
     private static final String CHANNEL_ID = "pjsk_capture";
@@ -52,17 +58,26 @@ public final class CaptureService extends Service {
     private static final long NOTIFICATION_UPDATE_INTERVAL_MS = 3000;
     private static final long FPS_WINDOW_MS = 1000;
     private static final long CLICK_RESUME_DELAY_MS = 5000;
+    private static final long LOGIC_CONFIG_REFRESH_MS = 1000;
+    // Near-120 Hz motion updates keep long-note movement independent of capture FPS.
+    private static final long LOGIC_TIMELINE_TICK_MS = 8;
 
     private static volatile boolean running;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService startupWorker = Executors.newSingleThreadExecutor();
+    private final ScheduledExecutorService logicTimelineWorker = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean processing = new AtomicBoolean(false);
+    private final AtomicBoolean logicTimelineFinishPending = new AtomicBoolean(false);
+    private final AtomicBoolean projectionRecoveryPending = new AtomicBoolean(false);
+    private final AtomicBoolean captureTargetLaunchPending = new AtomicBoolean(false);
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Object metricsLock = new Object();
 
     private ScreenCaptureSource captureSource;
     private NcnnDetector detector;
     private UiButtonDetector uiButtonDetector;
-    private AutoPlayer autoPlayer;
+    private volatile AutoPlayer autoPlayer;
     private AutoContinueController autoContinueController;
     private RootEventInjector injector;
     private StatusOverlay statusOverlay;
@@ -83,8 +98,15 @@ public final class CaptureService extends Service {
     private long lastOverlayUpdateMs;
     private long lastNotificationUpdateMs;
     private long lastDiagnosticsLogMs;
+    private long lastLogicConfigRefreshMs = Long.MIN_VALUE;
     private long clickResumeAtMs;
     private boolean previousNoClickMode;
+    private boolean previousLogicPlayMode;
+    private boolean cachedLogicPlaySettingEnabled;
+    private boolean cachedLogicPlayEnabled;
+    private int cachedLogicTapIntervalMs = 500;
+    private double cachedLogicTapXRatio = 0.5;
+    private List<AutoPlayer.LogicEvent> cachedLogicEvents = Collections.emptyList();
     private String detectorStatus = "";
     private String autoContinueStatus = AutoContinueController.STATUS_PLAYING;
 
@@ -95,6 +117,11 @@ public final class CaptureService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        logicTimelineWorker.scheduleAtFixedRate(
+                this::advanceLogicTimeline,
+                0L,
+                LOGIC_TIMELINE_TICK_MS,
+                TimeUnit.MILLISECONDS);
         createNotificationChannel();
         Notification notification = buildNotification("等待录屏授权");
         if (Build.VERSION.SDK_INT >= 29) {
@@ -115,8 +142,7 @@ public final class CaptureService extends Service {
 
         String action = intent.getAction();
         if (ACTION_STOP.equals(action)) {
-            stopEverything();
-            stopSelf();
+            stopAndTerminateApp();
             return START_NOT_STICKY;
         }
 
@@ -130,14 +156,20 @@ public final class CaptureService extends Service {
         if (ACTION_START.equals(action)) {
             int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
             Intent resultData = intent.getParcelableExtra(EXTRA_RESULT_DATA);
-            startCapture(resultCode, resultData);
+            boolean launchCaptureTarget = intent.getBooleanExtra(
+                    EXTRA_LAUNCH_CAPTURE_TARGET,
+                    false);
+            // NCNN model creation can take several seconds. Never do it from the service main
+            // thread, otherwise the activity sharing this process will receive an input ANR.
+            updateNotification("\u6b63\u5728\u521d\u59cb\u5316\u6a21\u578b");
+            startupWorker.execute(() -> startCapture(resultCode, resultData, launchCaptureTarget));
             return START_STICKY;
         }
 
         return START_NOT_STICKY;
     }
 
-    private void startCapture(int resultCode, Intent resultData) {
+    private void startCapture(int resultCode, Intent resultData, boolean launchCaptureTarget) {
         if (resultData == null) {
             Log.e(TAG, "missing MediaProjection result data");
             updateNotification("启动失败：缺少录屏授权");
@@ -145,15 +177,21 @@ public final class CaptureService extends Service {
         }
 
         stopEverything();
+        captureTargetLaunchPending.set(launchCaptureTarget);
         running = true;
+        projectionRecoveryPending.set(false);
 
         detector = new NcnnDetector(this);
         detectorStatus = detector.status();
         Log.i(TAG, "detector status: " + detectorStatus);
         injector = new RootEventInjector(this);
         autoPlayer = new AutoPlayer(injector, this::recordAction);
-        updateAutoSoloRuntime(AppSettings.isAutoSoloModeEnabled(this));
+        updateAutoSoloRuntime(shouldRunAutoContinue());
         resetCounters();
+        previousLogicPlayMode = AppSettings.isLogicPlayModeEnabled(this);
+        if (previousLogicPlayMode) {
+            forceLogicPlayWaitLoading(autoPlayer);
+        }
         previousNoClickMode = AppSettings.isNoClickMode(this);
         clickResumeAtMs = 0L;
         showOverlay("启动中\n模型：" + detectorStatus);
@@ -177,6 +215,13 @@ public final class CaptureService extends Service {
         captureSource = new ScreenCaptureSource(this, projection, new ScreenCaptureSource.Listener() {
             @Override
             public boolean shouldCaptureFrame() {
+                AutoPlayer currentAutoPlayer = autoPlayer;
+                // Logic play has its own monotonic-clock scheduler.  Keep the
+                // MediaProjection alive, but skip bitmap conversion, inference,
+                // preview drawing, and worker dispatch until the timeline ends.
+                if (currentAutoPlayer != null && currentAutoPlayer.isLogicPlayActive()) {
+                    return false;
+                }
                 if (processing.compareAndSet(false, true)) {
                     return true;
                 }
@@ -195,23 +240,81 @@ public final class CaptureService extends Service {
                 recordDroppedFrame();
                 processing.set(false);
             }
+
+            @Override
+            public void onCaptureStopped() {
+                if (projectionRecoveryPending.compareAndSet(false, true)) {
+                    processing.set(false);
+                    AutoPlayer player = autoPlayer;
+                    if (player != null) {
+                        player.setClickEnabled(false);
+                    }
+                    worker.execute(CaptureService.this::recoverStoppedProjection);
+                }
+            }
         });
         captureSource.start();
+        launchCaptureTargetAfterDisplayReady();
 
         updateVisibleStatus(formatStatus(0), true);
+    }
+
+    /**
+     * A single-app projection may not emit a frame until its selected game is foreground.
+     * Waiting for the first frame would therefore deadlock at a black preview. Returning
+     * from createVirtualDisplay confirms the capture surface is ready, while the overlay
+     * was already shown above; that is the safe point to open the selected game.
+     */
+    private void launchCaptureTargetAfterDisplayReady() {
+        if (!captureTargetLaunchPending.compareAndSet(true, false)) {
+            return;
+        }
+        mainHandler.postDelayed(() -> {
+            if (!running || projectionRecoveryPending.get()) {
+                return;
+            }
+            String packageName = AppSettings.captureTargetPackage(this);
+            if (packageName.isEmpty()) {
+                return;
+            }
+            Intent launchIntent = getPackageManager().getLaunchIntentForPackage(packageName);
+            if (launchIntent == null) {
+                Log.w(TAG, "capture target is no longer installed: " + packageName);
+                return;
+            }
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            try {
+                startActivity(launchIntent);
+                Log.i(TAG, "capture ready; opened target " + packageName);
+            } catch (RuntimeException error) {
+                Log.e(TAG, "failed to open capture target", error);
+            }
+        }, 250L);
     }
 
     private void processFrame(ScreenCaptureSource.Frame frame) {
         long inferenceStartMs = SystemClock.elapsedRealtime();
         try {
+            if (projectionRecoveryPending.get()) {
+                return;
+            }
             NcnnDetector currentDetector = detector;
             AutoPlayer currentAutoPlayer = autoPlayer;
             if (currentDetector == null || currentAutoPlayer == null) {
                 return;
             }
 
+            updateLogicPlayRuntime(currentAutoPlayer);
+            boolean logicPlayEnabled = AppSettings.isLogicPlayModeEnabled(this);
+            if (logicPlayEnabled && !previousLogicPlayMode) {
+                AppSettings.setAutoSoloModeEnabled(this, true);
+                forceLogicPlayWaitLoading(currentAutoPlayer);
+            }
+            previousLogicPlayMode = logicPlayEnabled;
+
             AutoContinueController currentAutoContinueController = autoContinueController;
-            if (AppSettings.isAutoSoloModeEnabled(this)) {
+            if (shouldRunAutoContinue()) {
                 if (currentAutoContinueController == null) {
                     updateAutoSoloRuntime(true);
                     currentAutoContinueController = autoContinueController;
@@ -223,18 +326,44 @@ public final class CaptureService extends Service {
 
             if (currentAutoContinueController != null) {
                 updateClickMode(currentAutoPlayer);
-                currentAutoContinueController.onFrame(
-                        frame.bitmap,
-                        frame.displayWidth,
-                        frame.displayHeight,
-                        isClickBlockedNow(),
-                        Collections.emptyList());
+                // A logic timeline determines its own end. Do not run LIVE CLEAR image detection
+                // while it is actively playing, otherwise a false match can interrupt the timeline.
+                if (!logicPlayEnabled || !currentAutoPlayer.isLogicPlayActive()) {
+                    currentAutoContinueController.onFrame(
+                            frame.bitmap,
+                            frame.displayWidth,
+                            frame.displayHeight,
+                            isClickBlockedNow(),
+                            Collections.emptyList());
+                }
                 autoContinueStatus = currentAutoContinueController.statusText();
-                if (currentAutoContinueController.shouldSuppressGameRecognition()) {
+                if (logicPlayEnabled
+                        && currentAutoContinueController.consumeEnteredPlayingFromLoading()) {
+                    currentAutoContinueController.waitForFirstLogicNote();
+                    autoContinueStatus = currentAutoContinueController.statusText();
+                    // 状态刚从“等待加载”变成“演奏乐曲”。本帧只提交状态变化，
+                    // 不运行音符识别或逻辑时间轴，下一帧才能由真实首音符触发。
                     currentAutoPlayer.setClickEnabled(false);
+                    currentAutoPlayer.resetLogicPlayRuntime();
+                    currentAutoPlayer.resetNoteRecognitionState();
                     handleAutoContinueFrame(frame, inferenceStartMs, currentAutoContinueController);
                     return;
                 }
+                if (currentAutoContinueController.shouldSuppressGameRecognition()) {
+                    currentAutoPlayer.setClickEnabled(false);
+                    currentAutoPlayer.resetLogicPlayRuntime();
+                    handleAutoContinueFrame(frame, inferenceStartMs, currentAutoContinueController);
+                    return;
+                }
+            }
+
+            if (currentAutoPlayer.isLogicPlayActive()) {
+                updateClickMode(currentAutoPlayer);
+                handleLogicPlayFrame(frame, inferenceStartMs, currentAutoPlayer);
+                if (currentAutoPlayer.isLogicPlayFinished()) {
+                    finishLogicPlay(currentAutoPlayer, currentAutoContinueController);
+                }
+                return;
             }
 
             long detectStartMs = SystemClock.elapsedRealtime();
@@ -266,6 +395,12 @@ public final class CaptureService extends Service {
                     frame.displayWidth,
                     frame.displayHeight,
                     frame.timestampSec);
+            if (logicPlayEnabled
+                    && currentAutoContinueController != null
+                    && currentAutoPlayer.isLogicPlayActive()) {
+                currentAutoContinueController.enterLogicPlaying();
+                autoContinueStatus = currentAutoContinueController.statusText();
+            }
             long actionMs = Math.max(0L, SystemClock.elapsedRealtime() - actionStartMs);
             long totalMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
 
@@ -334,7 +469,130 @@ public final class CaptureService extends Service {
         }
     }
 
+
+    private void updateLogicPlayRuntime(AutoPlayer currentAutoPlayer) {
+        boolean enabled = AppSettings.isLogicPlayModeEnabled(this);
+        long now = SystemClock.elapsedRealtime();
+        if (lastLogicConfigRefreshMs == Long.MIN_VALUE
+                || enabled != cachedLogicPlaySettingEnabled
+                || now - lastLogicConfigRefreshMs >= LOGIC_CONFIG_REFRESH_MS) {
+            refreshLogicPlayConfig(enabled, now);
+        }
+        currentAutoPlayer.setLogicPlayConfig(
+                cachedLogicPlayEnabled,
+                cachedLogicTapIntervalMs,
+                cachedLogicTapXRatio,
+                cachedLogicEvents);
+    }
+
+    private void refreshLogicPlayConfig(boolean enabled, long now) {
+        AppSettings.LogicPlayPlan plan = AppSettings.getLogicPlayPlan(this);
+        List<AutoPlayer.LogicEvent> events = new ArrayList<>(plan.events.size());
+        for (AppSettings.LogicEvent event : plan.events) {
+            List<AutoPlayer.LogicPoint> points = new ArrayList<>(event.points.size());
+            for (AppSettings.LogicPoint point : event.points) {
+                points.add(new AutoPlayer.LogicPoint(point.timeMs, point.xRatio));
+            }
+            events.add(new AutoPlayer.LogicEvent(
+                    event.timeMs,
+                    event.type,
+                    event.xRatio,
+                    event.endXRatio,
+                    event.durationMs,
+                    points));
+        }
+        cachedLogicPlaySettingEnabled = enabled;
+        cachedLogicPlayEnabled = enabled && plan.valid;
+        cachedLogicTapIntervalMs = plan.tapIntervalMs;
+        cachedLogicTapXRatio = plan.tapXRatio;
+        cachedLogicEvents = events.isEmpty() ? Collections.emptyList() : events;
+        lastLogicConfigRefreshMs = now;
+    }
+
+    private boolean shouldRunAutoContinue() {
+        return AppSettings.isAutoSoloModeEnabled(this)
+                || AppSettings.isLogicPlayModeEnabled(this);
+    }
+
+    private void forceLogicPlayWaitLoading(AutoPlayer currentAutoPlayer) {
+        AppSettings.setAutoSoloModeEnabled(this, true);
+        updateAutoSoloRuntime(true);
+        if (autoContinueController != null) {
+            autoContinueController.forceWaitLoading();
+            autoContinueStatus = autoContinueController.statusText();
+        }
+        if (currentAutoPlayer != null) {
+            currentAutoPlayer.resetLogicPlayRuntime();
+        }
+    }
+
+    private void handleLogicPlayFrame(
+            ScreenCaptureSource.Frame frame,
+            long inferenceStartMs,
+            AutoPlayer currentAutoPlayer) {
+        // Geometry was captured when logic mode started.  Gesture positions are
+        // now advanced by the dedicated 120 Hz clock, not capture-frame cadence.
+        currentAutoPlayer.setActionYBase(AppSettings.getActionY(this));
+        lastInferenceMs = Math.max(0L, SystemClock.elapsedRealtime() - inferenceStartMs);
+        recordProcessedFrame();
+        updateRuntimeStatus(0);
+        updatePreview(frame, Collections.emptyList(), lastInferenceMs, AppSettings.getActionY(this));
+
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastDiagnosticsLogMs >= 1000) {
+            lastDiagnosticsLogMs = now;
+            Log.i(TAG, "frame=" + frame.width + "x" + frame.height
+                    + " display=" + frame.displayWidth + "x" + frame.displayHeight
+                    + " fps=" + String.format(Locale.US, "%.1f", currentFps)
+                    + " infer=" + lastInferenceMs + "ms"
+                    + " stageMs=capture:" + frame.captureMs
+                    + ",detect:paused:logic"
+                    + ",preview:logic"
+                    + ",action:logic-clock"
+                    + " drop/s=" + String.format(Locale.US, "%.1f", currentDropFps)
+                    + " logic=" + currentAutoPlayer.logicPlayStatus());
+        }
+    }
+
+    private void advanceLogicTimeline() {
+        AutoPlayer currentAutoPlayer = autoPlayer;
+        if (currentAutoPlayer == null || !currentAutoPlayer.isLogicPlayActive()) {
+            return;
+        }
+        currentAutoPlayer.advanceLogicTimeline(System.nanoTime() / 1_000_000_000.0);
+        if (currentAutoPlayer.isLogicPlayFinished()
+                && logicTimelineFinishPending.compareAndSet(false, true)) {
+            worker.execute(() -> {
+                try {
+                    if (autoPlayer == currentAutoPlayer && currentAutoPlayer.isLogicPlayFinished()) {
+                        finishLogicPlay(currentAutoPlayer, autoContinueController);
+                    }
+                } finally {
+                    logicTimelineFinishPending.set(false);
+                }
+            });
+        }
+    }
+
+    private void finishLogicPlay(
+            AutoPlayer currentAutoPlayer,
+            AutoContinueController currentAutoContinueController) {
+        currentAutoPlayer.resetLogicPlayRuntime();
+        currentAutoPlayer.setClickEnabled(false);
+        if (currentAutoContinueController != null) {
+            currentAutoContinueController.forceGameEnded();
+            autoContinueStatus = currentAutoContinueController.statusText();
+        }
+        Log.i(TAG, "logic timeline completed, switching to game ended state");
+    }
+
     private void updateAutoSoloRuntime(boolean enabled) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            // Toggling modes from the overlay runs on the main thread. UI model construction must
+            // follow the same background path as normal capture startup.
+            startupWorker.execute(() -> updateAutoSoloRuntime(enabled));
+            return;
+        }
         if (!enabled) {
             autoContinueController = null;
             if (uiButtonDetector != null) {
@@ -354,7 +612,11 @@ public final class CaptureService extends Service {
         }
         if (autoContinueController == null) {
             autoContinueController = new AutoContinueController(injector, uiButtonDetector);
-            autoContinueController.reset();
+            if (AppSettings.isLogicPlayModeEnabled(this)) {
+                autoContinueController.forceWaitLoading();
+            } else {
+                autoContinueController.reset();
+            }
             autoContinueStatus = autoContinueController.statusText();
         }
     }
@@ -468,6 +730,7 @@ public final class CaptureService extends Service {
                 statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
                 statusOverlay.setClickBlocked(isClickBlockedNow());
                 statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
+                statusOverlay.setLogicPlayMode(AppSettings.isLogicPlayModeEnabled(this));
                 statusOverlay.setAutoContinueStatus(autoContinueStatus);
             }
         }
@@ -541,7 +804,38 @@ public final class CaptureService extends Service {
         updateVisibleStatus(text, true);
     }
 
+    /**
+     * A user-choice MediaProjection ends when the chosen game process exits.
+     * Stop all input immediately, then bring the activity forward for a fresh
+     * single-app authorization. Root grants the AppOp first; Android may still
+     * require the user to confirm the system dialog.
+     */
+    private void recoverStoppedProjection() {
+        Log.w(TAG, "single-app media projection stopped; requesting reauthorization");
+        processing.set(false);
+        running = false;
+        AutoPlayer player = autoPlayer;
+        if (player != null) {
+            player.setClickEnabled(false);
+        }
+        updateVisibleStatus("录屏已停止，正在申请单应用录屏授权", true);
+
+        updateVisibleStatus("录屏已停止，请在主界面点击开始运行重新授权", true);
+        Intent intent = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(MainActivity.EXTRA_AUTO_REAUTHORIZE, true);
+        try {
+            startActivity(intent);
+        } catch (RuntimeException error) {
+            Log.e(TAG, "failed to launch reauthorization activity", error);
+            updateVisibleStatus("录屏已停止，请回软件重新授权单应用录屏", true);
+        }
+    }
+
     private void stopEverything() {
+        captureTargetLaunchPending.set(false);
         releaseRuntime();
         running = false;
         if (previewOverlay != null) {
@@ -555,7 +849,36 @@ public final class CaptureService extends Service {
         updateNotification("已停止");
     }
 
+    /**
+     * The explicit user stop command should leave no background capture or injector process behind.
+     * Only this app package is force-stopped; the selected game process is never targeted.
+     */
+    private void stopAndTerminateApp() {
+        stopEverything();
+        stopSelf();
+        final String ownPackage = getPackageName();
+        Thread terminator = new Thread(() -> {
+            Process process = null;
+            try {
+                process = Runtime.getRuntime().exec(new String[]{
+                        "su", "-c", "am force-stop " + ownPackage
+                });
+                process.waitFor();
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            } catch (Exception exception) {
+                Log.w(TAG, "failed to force-stop own package", exception);
+            } finally {
+                if (process != null) {
+                    process.destroy();
+                }
+            }
+        }, "autoplayer-stop-terminator");
+        terminator.start();
+    }
+
     private void releaseRuntime() {
+        logicTimelineFinishPending.set(false);
         if (captureSource != null) {
             captureSource.close();
             captureSource = null;
@@ -582,11 +905,13 @@ public final class CaptureService extends Service {
     private void showOverlay(String text) {
         if (statusOverlay == null) {
             statusOverlay = new StatusOverlay(this, () -> {
-                stopEverything();
-                stopSelf();
+                stopAndTerminateApp();
             }, () -> setPreviewEnabled(!AppSettings.isPreviewEnabled(this)),
                     this::toggleNoClickMode,
                     this::toggleAutoSoloMode,
+                    this::toggleLogicPlayMode,
+                    this::switchLogicProfile,
+                    this::resetPlaybackState,
                     this::toggleDebugDisplay);
         }
         statusOverlay.show(text);
@@ -594,6 +919,7 @@ public final class CaptureService extends Service {
         statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
         statusOverlay.setClickBlocked(isClickBlockedNow());
         statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
+        statusOverlay.setLogicPlayMode(AppSettings.isLogicPlayModeEnabled(this));
         statusOverlay.setAutoContinueStatus(autoContinueStatus);
         statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
     }
@@ -623,6 +949,73 @@ public final class CaptureService extends Service {
             statusOverlay.setAutoContinueStatus(autoContinueStatus);
         }
         updateNotification(enabled ? "已开启自动单人模式" : "已关闭自动单人模式");
+    }
+
+
+    private void toggleLogicPlayMode() {
+        boolean enabled = !AppSettings.isLogicPlayModeEnabled(this);
+        AppSettings.setLogicPlayModeEnabled(this, enabled);
+        AutoPlayer currentAutoPlayer = autoPlayer;
+        if (enabled) {
+            forceLogicPlayWaitLoading(currentAutoPlayer);
+            previousLogicPlayMode = true;
+        } else {
+            previousLogicPlayMode = false;
+        }
+        if (currentAutoPlayer != null) {
+            updateLogicPlayRuntime(currentAutoPlayer);
+        }
+        if (statusOverlay != null) {
+            statusOverlay.setAutoSoloMode(AppSettings.isAutoSoloModeEnabled(this));
+            statusOverlay.setLogicPlayMode(enabled);
+            statusOverlay.setAutoContinueStatus(autoContinueStatus);
+        }
+        updateNotification(enabled ? "\u5df2\u5f00\u542f\u903b\u8f91\u6f14\u594f\u6a21\u5f0f\uff0c\u7b49\u5f85 LIFE \u52a0\u8f7d" : "\u5df2\u5173\u95ed\u903b\u8f91\u6f14\u594f\u6a21\u5f0f");
+    }
+
+    /** Cycles the selected JSON without restarting the capture service. */
+    private void switchLogicProfile() {
+        // ADB may have copied new JSON files while the service was already running.
+        AppSettings.importLogicProfilesFromDirectory(this);
+        String label = AppSettings.nextLogicProfile(this);
+        lastLogicConfigRefreshMs = Long.MIN_VALUE;
+        AutoPlayer currentAutoPlayer = autoPlayer;
+        if (currentAutoPlayer != null) {
+            updateLogicPlayRuntime(currentAutoPlayer);
+            currentAutoPlayer.resetLogicPlayRuntime();
+        }
+        String message = "\u5df2\u5207\u6362\u903b\u8f91 JSON\uff1a" + label;
+        if (statusOverlay != null) {
+            statusOverlay.updateStatus(message);
+        }
+        updateNotification(message);
+    }
+
+    private void resetPlaybackState() {
+        AutoPlayer currentAutoPlayer = autoPlayer;
+        if (currentAutoPlayer != null) {
+            currentAutoPlayer.resetLogicPlayRuntime();
+        }
+
+        if (shouldRunAutoContinue()) {
+            updateAutoSoloRuntime(true);
+        }
+        if (autoContinueController != null) {
+            if (AppSettings.isLogicPlayModeEnabled(this)) {
+                autoContinueController.forceWaitLoading();
+            } else {
+                autoContinueController.reset();
+            }
+            autoContinueStatus = autoContinueController.statusText();
+        } else {
+            autoContinueStatus = AutoContinueController.STATUS_PLAYING;
+        }
+
+        if (statusOverlay != null) {
+            statusOverlay.setAutoContinueStatus(autoContinueStatus);
+        }
+        updateNotification("\u5df2\u91cd\u7f6e\u8fd0\u884c\u72b6\u6001\uff1a" + autoContinueStatus);
+        Log.i(TAG, "playback state reset to " + autoContinueStatus);
     }
 
     private void toggleDebugDisplay() {
@@ -734,6 +1127,8 @@ public final class CaptureService extends Service {
     @Override
     public void onDestroy() {
         stopEverything();
+        logicTimelineWorker.shutdownNow();
+        startupWorker.shutdownNow();
         worker.shutdownNow();
         super.onDestroy();
     }
@@ -743,4 +1138,3 @@ public final class CaptureService extends Service {
         return null;
     }
 }
-
