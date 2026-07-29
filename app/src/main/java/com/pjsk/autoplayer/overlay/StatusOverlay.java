@@ -25,17 +25,23 @@ public final class StatusOverlay {
     private final Runnable onStopClick;
     private final Runnable onPreviewClick;
     private final Runnable onNoClickClick;
+    private final Runnable onDebugDisplayClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private WindowManager windowManager;
     private WindowManager.LayoutParams params;
     private LinearLayout rootView;
     private LinearLayout contentView;
+    private LinearLayout parameterView;
+    private TextView statusTitleView;
     private TextView statusView;
     private Button collapseButton;
+    private Button detailsButton;
     private Button previewButton;
     private Button noClickButton;
+    private Button debugDisplayButton;
     private boolean collapsed;
+    private boolean parametersVisible;
 
     private int startX;
     private int startY;
@@ -46,11 +52,13 @@ public final class StatusOverlay {
             Context context,
             Runnable onStopClick,
             Runnable onPreviewClick,
-            Runnable onNoClickClick) {
+            Runnable onNoClickClick,
+            Runnable onDebugDisplayClick) {
         this.context = context.getApplicationContext();
         this.onStopClick = onStopClick;
         this.onPreviewClick = onPreviewClick;
         this.onNoClickClick = onNoClickClick;
+        this.onDebugDisplayClick = onDebugDisplayClick;
     }
 
     public static boolean canDrawOverlays(Context context) {
@@ -59,6 +67,10 @@ public final class StatusOverlay {
 
     public void show(String statusText) {
         mainHandler.post(() -> showOnMain(statusText));
+    }
+
+    public boolean isShown() {
+        return rootView != null;
     }
 
     public void updateStatus(String statusText) {
@@ -85,6 +97,18 @@ public final class StatusOverlay {
         });
     }
 
+    public void setClickBlocked(boolean blocked) {
+        mainHandler.post(() -> updateClickModeColor(blocked));
+    }
+
+    public void setDebugDisplayEnabled(boolean enabled) {
+        mainHandler.post(() -> {
+            if (debugDisplayButton != null) {
+                debugDisplayButton.setText(enabled ? "关调试" : "调试显示");
+            }
+        });
+    }
+
     public void dismiss() {
         mainHandler.post(() -> {
             if (windowManager == null || rootView == null) {
@@ -94,13 +118,7 @@ public final class StatusOverlay {
                 windowManager.removeView(rootView);
             } catch (IllegalArgumentException ignored) {
             }
-            rootView = null;
-            contentView = null;
-            statusView = null;
-            collapseButton = null;
-            previewButton = null;
-            noClickButton = null;
-            params = null;
+            clearViews();
         });
     }
 
@@ -137,20 +155,14 @@ public final class StatusOverlay {
             windowManager.addView(rootView, params);
         } catch (RuntimeException e) {
             Log.e(TAG, "failed to show overlay", e);
-            rootView = null;
-            contentView = null;
-            statusView = null;
-            collapseButton = null;
-            previewButton = null;
-            noClickButton = null;
-            params = null;
+            clearViews();
         }
     }
 
     private LinearLayout buildView(String statusText) {
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(12), dp(10), dp(12), dp(10));
+        root.setPadding(dp(10), dp(8), dp(10), dp(8));
         root.setBackground(makeBackground());
         root.setOnTouchListener((view, event) -> handleDrag(event));
 
@@ -158,22 +170,23 @@ public final class StatusOverlay {
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView title = new TextView(context);
-        title.setText("运行状态");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(14f);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        header.addView(title, new LinearLayout.LayoutParams(
+        statusTitleView = new TextView(context);
+        statusTitleView.setText("运行状态");
+        statusTitleView.setTextSize(14f);
+        statusTitleView.setTypeface(Typeface.DEFAULT_BOLD);
+        updateClickModeColor(false);
+        header.addView(statusTitleView, new LinearLayout.LayoutParams(
                 0,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 1f));
 
-        collapseButton = new Button(context);
-        collapseButton.setText("折叠");
-        collapseButton.setAllCaps(false);
-        collapseButton.setMinHeight(0);
-        collapseButton.setMinimumHeight(0);
-        collapseButton.setPadding(dp(6), 0, dp(6), 0);
+        debugDisplayButton = makeSmallButton("调试显示");
+        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
+        LinearLayout.LayoutParams debugParams = new LinearLayout.LayoutParams(dp(86), dp(32));
+        debugParams.setMargins(0, 0, dp(6), 0);
+        header.addView(debugDisplayButton, debugParams);
+
+        collapseButton = makeSmallButton("折叠");
         collapseButton.setOnClickListener(v -> setCollapsed(!collapsed));
         header.addView(collapseButton, new LinearLayout.LayoutParams(dp(66), dp(32)));
 
@@ -184,6 +197,10 @@ public final class StatusOverlay {
         contentView = new LinearLayout(context);
         contentView.setOrientation(LinearLayout.VERTICAL);
 
+        parameterView = new LinearLayout(context);
+        parameterView.setOrientation(LinearLayout.VERTICAL);
+        parameterView.setVisibility(View.GONE);
+
         statusView = new TextView(context);
         statusView.setText(statusText);
         statusView.setTextColor(Color.rgb(225, 232, 240));
@@ -192,41 +209,37 @@ public final class StatusOverlay {
                 dp(220),
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         statusParams.setMargins(0, dp(4), 0, dp(8));
-        contentView.addView(statusView, statusParams);
+        parameterView.addView(statusView, statusParams);
+        contentView.addView(parameterView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
 
-        previewButton = new Button(context);
-        previewButton.setText("开启预览");
-        previewButton.setAllCaps(false);
-        previewButton.setMinHeight(0);
-        previewButton.setMinimumHeight(0);
-        previewButton.setPadding(dp(8), 0, dp(8), 0);
+        previewButton = makeSmallButton("开启预览");
         previewButton.setOnClickListener(v -> onPreviewClick.run());
         LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
-        previewParams.setMargins(0, 0, dp(6), 0);
+        previewParams.setMargins(0, dp(6), dp(6), 0);
         row.addView(previewButton, previewParams);
 
-        noClickButton = new Button(context);
-        noClickButton.setText("不点击");
-        noClickButton.setAllCaps(false);
-        noClickButton.setMinHeight(0);
-        noClickButton.setMinimumHeight(0);
-        noClickButton.setPadding(dp(6), 0, dp(6), 0);
+        noClickButton = makeSmallButton("不点击");
         noClickButton.setOnClickListener(v -> onNoClickClick.run());
         LinearLayout.LayoutParams noClickParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
-        noClickParams.setMargins(0, 0, dp(6), 0);
+        noClickParams.setMargins(0, dp(6), dp(6), 0);
         row.addView(noClickButton, noClickParams);
 
-        Button stop = new Button(context);
-        stop.setText("停止");
-        stop.setAllCaps(false);
-        stop.setMinHeight(0);
-        stop.setMinimumHeight(0);
-        stop.setPadding(dp(8), 0, dp(8), 0);
+        detailsButton = makeSmallButton("显示参数");
+        detailsButton.setOnClickListener(v -> setParametersVisible(!parametersVisible));
+        LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        detailsParams.setMargins(0, dp(6), dp(6), 0);
+        row.addView(detailsButton, detailsParams);
+
+        Button stop = makeSmallButton("停止");
         stop.setOnClickListener(v -> onStopClick.run());
-        row.addView(stop, new LinearLayout.LayoutParams(0, dp(38), 1f));
+        LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        stopParams.setMargins(0, dp(6), 0, 0);
+        row.addView(stop, stopParams);
 
         contentView.addView(row, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -238,21 +251,57 @@ public final class StatusOverlay {
         return root;
     }
 
+    private Button makeSmallButton(String text) {
+        Button button = new Button(context);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setPadding(dp(6), 0, dp(6), 0);
+        return button;
+    }
+
+    private void setParametersVisible(boolean visible) {
+        parametersVisible = visible;
+        if (parameterView != null) {
+            parameterView.setVisibility(visible && !collapsed ? View.VISIBLE : View.GONE);
+        }
+        if (detailsButton != null) {
+            detailsButton.setText(visible ? "隐藏参数" : "显示参数");
+        }
+        updateLayout();
+    }
+
     private void setCollapsed(boolean collapsed) {
         this.collapsed = collapsed;
         if (contentView != null) {
             contentView.setVisibility(collapsed ? View.GONE : View.VISIBLE);
+        }
+        if (parameterView != null) {
+            parameterView.setVisibility(!collapsed && parametersVisible ? View.VISIBLE : View.GONE);
         }
         if (collapseButton != null) {
             collapseButton.setText(collapsed ? "展开" : "折叠");
         }
         if (rootView != null) {
             rootView.setPadding(
-                    collapsed ? dp(10) : dp(12),
-                    collapsed ? dp(6) : dp(10),
-                    collapsed ? dp(10) : dp(12),
-                    collapsed ? dp(6) : dp(10));
+                    dp(10),
+                    collapsed ? dp(6) : dp(8),
+                    dp(10),
+                    collapsed ? dp(6) : dp(8));
         }
+        updateLayout();
+    }
+
+    private void updateClickModeColor(boolean noClickMode) {
+        if (statusTitleView != null) {
+            statusTitleView.setTextColor(noClickMode
+                    ? Color.rgb(255, 102, 102)
+                    : Color.rgb(94, 232, 142));
+        }
+    }
+
+    private void updateLayout() {
         if (windowManager != null && rootView != null && params != null) {
             try {
                 windowManager.updateViewLayout(rootView, params);
@@ -277,15 +326,28 @@ public final class StatusOverlay {
             case MotionEvent.ACTION_MOVE:
                 params.x = startX + Math.round(event.getRawX() - downRawX);
                 params.y = startY + Math.round(event.getRawY() - downRawY);
-                try {
-                    windowManager.updateViewLayout(rootView, params);
-                } catch (IllegalArgumentException ignored) {
-                }
+                updateLayout();
                 return true;
 
             default:
                 return false;
         }
+    }
+
+    private void clearViews() {
+        rootView = null;
+        contentView = null;
+        parameterView = null;
+        statusTitleView = null;
+        statusView = null;
+        collapseButton = null;
+        detailsButton = null;
+        previewButton = null;
+        noClickButton = null;
+        debugDisplayButton = null;
+        params = null;
+        parametersVisible = false;
+        collapsed = false;
     }
 
     private GradientDrawable makeBackground() {

@@ -23,6 +23,7 @@ import com.pjsk.autoplayer.overlay.DetectionPreviewOverlay;
 import com.pjsk.autoplayer.overlay.StatusOverlay;
 import com.pjsk.autoplayer.screen.ScreenCaptureSource;
 import com.pjsk.autoplayer.settings.AppSettings;
+import com.pjsk.autoplayer.settings.DebugDisplayController;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -359,6 +360,11 @@ public final class CaptureService extends Service {
         return "点击";
     }
 
+    private boolean isClickBlockedNow() {
+        return AppSettings.isNoClickMode(this)
+                || clickResumeAtMs > SystemClock.elapsedRealtime();
+    }
+
     private void updateRuntimeStatus(int detectionCount) {
         long now = SystemClock.elapsedRealtime();
         if (now - lastOverlayUpdateMs >= OVERLAY_UPDATE_INTERVAL_MS) {
@@ -366,6 +372,7 @@ public final class CaptureService extends Service {
             updateVisibleStatus(formatStatus(detectionCount), false);
             if (statusOverlay != null) {
                 statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
+                statusOverlay.setClickBlocked(isClickBlockedNow());
             }
         }
 
@@ -462,20 +469,46 @@ public final class CaptureService extends Service {
                 stopEverything();
                 stopSelf();
             }, () -> setPreviewEnabled(!AppSettings.isPreviewEnabled(this)),
-                    this::toggleNoClickMode);
+                    this::toggleNoClickMode,
+                    this::toggleDebugDisplay);
         }
         statusOverlay.show(text);
         statusOverlay.setPreviewEnabled(AppSettings.isPreviewEnabled(this));
         statusOverlay.setNoClickMode(AppSettings.isNoClickMode(this));
+        statusOverlay.setClickBlocked(isClickBlockedNow());
+        statusOverlay.setDebugDisplayEnabled(AppSettings.isDebugDisplayEnabled(this));
     }
 
     private void toggleNoClickMode() {
         boolean enabled = !AppSettings.isNoClickMode(this);
         AppSettings.setNoClickMode(this, enabled);
+        if (enabled) {
+            clickResumeAtMs = 0L;
+        } else {
+            clickResumeAtMs = SystemClock.elapsedRealtime() + CLICK_RESUME_DELAY_MS;
+            previousNoClickMode = false;
+        }
         if (statusOverlay != null) {
             statusOverlay.setNoClickMode(enabled);
+            statusOverlay.setClickBlocked(true);
         }
         updateNotification(enabled ? "已开启不点击模式" : "5 秒后恢复点击");
+    }
+
+    private void toggleDebugDisplay() {
+        boolean enabled = !AppSettings.isDebugDisplayEnabled(this);
+        AppSettings.setDebugDisplayEnabled(this, enabled);
+        if (statusOverlay != null) {
+            statusOverlay.setDebugDisplayEnabled(enabled);
+        }
+        updateNotification(enabled ? "已开启调试显示" : "已关闭调试显示");
+        new Thread(() -> {
+            boolean ok = DebugDisplayController.setEnabled(enabled);
+            if (!ok) {
+                Log.w(TAG, "failed to apply debug display settings");
+                updateNotification("调试显示设置失败，请检查 root 权限");
+            }
+        }, "pjsk-debug-display").start();
     }
 
     private void setPreviewEnabled(boolean enabled) {
@@ -504,7 +537,9 @@ public final class CaptureService extends Service {
     }
 
     private void updateVisibleStatus(String text, boolean alsoNotification) {
-        if (statusOverlay != null) {
+        if (statusOverlay == null || !statusOverlay.isShown()) {
+            showOverlay(text);
+        } else {
             statusOverlay.updateStatus(text);
         }
         if (alsoNotification) {

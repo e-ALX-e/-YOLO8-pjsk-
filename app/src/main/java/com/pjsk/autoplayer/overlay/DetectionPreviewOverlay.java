@@ -45,7 +45,9 @@ public final class DetectionPreviewOverlay {
     private LinearLayout rootView;
     private PreviewView previewView;
     private TextView calibrationView;
+    private Button calibrationLockButton;
     private long lastPreviewMs;
+    private boolean calibrationLocked = true;
 
     private int startX;
     private int startY;
@@ -80,6 +82,7 @@ public final class DetectionPreviewOverlay {
             rootView = null;
             previewView = null;
             calibrationView = null;
+            calibrationLockButton = null;
             params = null;
         });
     }
@@ -159,6 +162,7 @@ public final class DetectionPreviewOverlay {
             rootView = null;
             previewView = null;
             calibrationView = null;
+            calibrationLockButton = null;
             params = null;
         }
     }
@@ -198,6 +202,7 @@ public final class DetectionPreviewOverlay {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         previewView = new PreviewView(context, this::setActionYFromPreview);
+        previewView.setCalibrationLocked(calibrationLocked);
         LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(dp(360), dp(210));
         previewParams.setMargins(0, dp(8), 0, 0);
         root.addView(previewView, previewParams);
@@ -222,6 +227,15 @@ public final class DetectionPreviewOverlay {
         wrapper.addView(calibrationView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        calibrationLockButton = makeCalibrationButton("");
+        calibrationLockButton.setOnClickListener(v -> setCalibrationLocked(!calibrationLocked));
+        LinearLayout.LayoutParams lockParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(32));
+        lockParams.setMargins(0, dp(4), 0, 0);
+        wrapper.addView(calibrationLockButton, lockParams);
+        updateCalibrationLockButton();
 
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -264,11 +278,17 @@ public final class DetectionPreviewOverlay {
     }
 
     private void adjustActionY(double delta) {
+        if (calibrationLocked) {
+            return;
+        }
         AppSettings.setActionY(context, AppSettings.getActionY(context) + delta);
         refreshActionY();
     }
 
     private void setActionYFromPreview(double actionYBase) {
+        if (calibrationLocked) {
+            return;
+        }
         AppSettings.setActionY(context, actionYBase);
         refreshActionY();
     }
@@ -286,6 +306,20 @@ public final class DetectionPreviewOverlay {
                     Locale.US,
                     "判定点 %.0f",
                     AppSettings.getActionY(context)));
+        }
+    }
+
+    private void setCalibrationLocked(boolean locked) {
+        calibrationLocked = locked;
+        if (previewView != null) {
+            previewView.setCalibrationLocked(locked);
+        }
+        updateCalibrationLockButton();
+    }
+
+    private void updateCalibrationLockButton() {
+        if (calibrationLockButton != null) {
+            calibrationLockButton.setText(calibrationLocked ? "解锁判定线" : "锁定判定线");
         }
     }
 
@@ -397,6 +431,7 @@ public final class DetectionPreviewOverlay {
         private int frameHeight = 1;
         private double actionYBase = Config.ACTION_Y_DEFAULT;
         private String stats = "waiting";
+        private boolean calibrationLocked = true;
         private final CalibrationListener calibrationListener;
 
         PreviewView(Context context, CalibrationListener calibrationListener) {
@@ -441,6 +476,11 @@ public final class DetectionPreviewOverlay {
 
         void setActionYBase(double actionYBase) {
             this.actionYBase = AppSettings.clampActionY(actionYBase);
+            invalidate();
+        }
+
+        void setCalibrationLocked(boolean calibrationLocked) {
+            this.calibrationLocked = calibrationLocked;
             invalidate();
         }
 
@@ -531,6 +571,9 @@ public final class DetectionPreviewOverlay {
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
+            if (calibrationLocked) {
+                return true;
+            }
             if (event.getActionMasked() != MotionEvent.ACTION_DOWN
                     && event.getActionMasked() != MotionEvent.ACTION_MOVE) {
                 return true;

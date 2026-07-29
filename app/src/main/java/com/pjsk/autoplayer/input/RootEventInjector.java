@@ -67,8 +67,8 @@ public final class RootEventInjector implements TouchInjector {
     public RootEventInjector(Context context) {
         this.context = context.getApplicationContext();
         int[] display = getDisplaySize(context);
-        displayW = display[0];
-        displayH = display[1];
+        displayW = Math.max(display[0], display[1]);
+        displayH = Math.min(display[0], display[1]);
         displayRotation = getDisplayRotation(context);
         pxScale = Config.scaleForFrame(displayW);
         maxRawX = Math.max(1, displayW - 1);
