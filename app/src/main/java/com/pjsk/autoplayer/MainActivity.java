@@ -1499,10 +1499,15 @@ public final class MainActivity extends Activity {
             if ("inline-toggle".equals(control.getTag())) {
                 control.setTextColor(COLOR_MUTED);
                 control.setTextSize(11f);
+                control.setShowText(false);
+                control.setSwitchMinWidth(dp(42));
+                control.setThumbTextPadding(0);
                 control.setMinHeight(0);
                 control.setMinimumHeight(0);
+                control.setMinWidth(0);
+                control.setMinimumWidth(0);
                 control.setPadding(0, 0, 0, 0);
-                control.setBackgroundColor(Color.TRANSPARENT);
+                control.setBackground(null);
                 return;
             }
             control.setTextColor(COLOR_TEXT);
