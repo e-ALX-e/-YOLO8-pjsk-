@@ -246,7 +246,7 @@ public final class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setPadding(dp(16), dp(18) + statusBarHeight(), dp(16), dp(24));
+        root.setPadding(dp(16), dp(18) + statusBarHeight(), dp(16), 0);
         root.setBackgroundColor(COLOR_PAGE);
 
         TextView title = new TextView(this);
@@ -304,12 +304,28 @@ public final class MainActivity extends Activity {
         pageTabsParams.setMargins(0, dp(12), 0, dp(2));
         root.addView(pageTabs, pageTabsParams);
 
+        ScrollView pageScrollView = new ScrollView(this);
+        pageScrollView.setFillViewport(true);
+        pageScrollView.setClipToPadding(false);
+        pageScrollView.setBackgroundColor(COLOR_PAGE);
+        LinearLayout.LayoutParams pageScrollParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+        root.addView(pageScrollView, pageScrollParams);
+
+        LinearLayout pageContent = new LinearLayout(this);
+        pageContent.setOrientation(LinearLayout.VERTICAL);
+        pageContent.setGravity(Gravity.CENTER_HORIZONTAL);
+        pageContent.setPadding(0, dp(4), 0, dp(24));
+        pageScrollView.addView(pageContent, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT));
+
         runPage = createPage();
         logicPage = createPage();
         debugPage = createPage();
-        root.addView(runPage, matchWrap());
-        root.addView(logicPage, matchWrap());
-        root.addView(debugPage, matchWrap());
+        pageContent.addView(runPage, matchWrap());
+        pageContent.addView(logicPage, matchWrap());
+        pageContent.addView(debugPage, matchWrap());
 
         addCaptureTargetControls(runPage);
 
@@ -416,16 +432,9 @@ public final class MainActivity extends Activity {
         hintParams.setMargins(0, dp(10), 0, 0);
         runPage.addView(hint, hintParams);
 
-        ScrollView scrollView = new ScrollView(this);
-        scrollView.setFillViewport(true);
-        scrollView.setClipToPadding(false);
-        scrollView.setBackgroundColor(COLOR_PAGE);
         styleInteractiveViews(root);
         setActivePage(0);
-        scrollView.addView(root, new ScrollView.LayoutParams(
-                ScrollView.LayoutParams.MATCH_PARENT,
-                ScrollView.LayoutParams.WRAP_CONTENT));
-        setContentView(scrollView);
+        setContentView(root);
 
         if (getIntent().getBooleanExtra(EXTRA_AUTO_REAUTHORIZE, false)) {
             getIntent().removeExtra(EXTRA_AUTO_REAUTHORIZE);
