@@ -39,8 +39,8 @@ public final class StatusOverlay {
     private static final int PARAMETER_PANEL_GAP_DP = 8;
     private static final int GRID_BUTTON_HEIGHT_DP = 36;
     private static final int GRID_BUTTON_GAP_DP = 6;
-    // Three complete button rows, with room for the full lower stroke and rounded corners.
-    private static final int CONTROL_AREA_HEIGHT_DP = 132;
+    // Three complete button rows plus a small breathing gap below the last row.
+    private static final int CONTROL_AREA_HEIGHT_DP = 138;
     private static final int COLOR_BUTTON = Color.rgb(44, 53, 68);
     private static final int COLOR_BUTTON_BORDER = Color.rgb(84, 99, 122);
     private static final int COLOR_BUTTON_TEXT = Color.rgb(238, 244, 250);
