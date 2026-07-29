@@ -35,7 +35,8 @@ public final class StatusOverlay {
     private static final int MAX_OVERLAY_WIDTH_DP = 250;
     private static final int PARAMETER_PANEL_WIDTH_DP = 218;
     private static final int PARAMETER_PANEL_GAP_DP = 8;
-    private static final int CONTROL_AREA_HEIGHT_DP = 150;
+    // Exactly three 36dp button rows plus their 6dp top gaps: show nine main controls only.
+    private static final int CONTROL_AREA_HEIGHT_DP = 126;
     private static final int COLOR_BUTTON = Color.rgb(44, 53, 68);
     private static final int COLOR_BUTTON_BORDER = Color.rgb(84, 99, 122);
     private static final int COLOR_BUTTON_TEXT = Color.rgb(238, 244, 250);
@@ -414,7 +415,8 @@ public final class StatusOverlay {
         ScrollView buttonScrollView = new ScrollView(context);
         buttonScrollView.setFillViewport(false);
         buttonScrollView.setVerticalScrollBarEnabled(true);
-        buttonScrollView.setClipToPadding(false);
+        buttonScrollView.setClipToPadding(true);
+        buttonScrollView.setClipChildren(true);
         LinearLayout buttonList = new LinearLayout(context);
         buttonList.setOrientation(LinearLayout.VERTICAL);
         buttonScrollView.addView(buttonList, new ScrollView.LayoutParams(
