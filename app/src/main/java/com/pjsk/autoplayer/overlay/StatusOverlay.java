@@ -22,6 +22,8 @@ import com.pjsk.autoplayer.core.AutoContinueController;
 
 public final class StatusOverlay {
     private static final String TAG = "PJSK-StatusOverlay";
+    private static final int MIN_OVERLAY_WIDTH_DP = 210;
+    private static final int MAX_OVERLAY_WIDTH_DP = 250;
 
     private final Context context;
     private final Runnable onStopClick;
@@ -184,7 +186,7 @@ public final class StatusOverlay {
 
         rootView = buildView(statusText);
         params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
+                overlayWidthPx(),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 Build.VERSION.SDK_INT >= 26
                         ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -219,33 +221,27 @@ public final class StatusOverlay {
         statusTitleView.setTextSize(14f);
         statusTitleView.setTypeface(Typeface.DEFAULT_BOLD);
         updateClickModeColor();
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         titleParams.setMargins(0, 0, dp(8), 0);
+        titleParams.weight = 1f;
         header.addView(statusTitleView, titleParams);
 
         autoContinueStatusView = new TextView(context);
         autoContinueStatusView.setText(autoContinueStatus);
-        autoContinueStatusView.setTextSize(11f);
+        autoContinueStatusView.setTextSize(10f);
         autoContinueStatusView.setTypeface(Typeface.DEFAULT_BOLD);
         autoContinueStatusView.setGravity(Gravity.CENTER);
-        autoContinueStatusView.setPadding(dp(8), 0, dp(8), 0);
+        autoContinueStatusView.setPadding(dp(5), 0, dp(5), 0);
         autoContinueStatusView.setSingleLine(true);
         updateAutoContinueStatusColor();
-        LinearLayout.LayoutParams autoStatusParams = new LinearLayout.LayoutParams(dp(88), dp(28));
+        LinearLayout.LayoutParams autoStatusParams = new LinearLayout.LayoutParams(dp(70), dp(28));
         autoStatusParams.setMargins(0, 0, dp(6), 0);
         header.addView(autoContinueStatusView, autoStatusParams);
 
-        debugDisplayButton = makeSmallButton("调试显示");
-        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
-        LinearLayout.LayoutParams debugParams = new LinearLayout.LayoutParams(dp(86), dp(32));
-        debugParams.setMargins(0, 0, dp(6), 0);
-        header.addView(debugDisplayButton, debugParams);
-
         collapseButton = makeSmallButton("折叠");
         collapseButton.setOnClickListener(v -> setCollapsed(!collapsed));
-        header.addView(collapseButton, new LinearLayout.LayoutParams(dp(66), dp(32)));
+        header.addView(collapseButton, new LinearLayout.LayoutParams(dp(54), dp(32)));
 
         root.addView(header, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -261,9 +257,11 @@ public final class StatusOverlay {
         statusView = new TextView(context);
         statusView.setText(statusText);
         statusView.setTextColor(Color.rgb(225, 232, 240));
-        statusView.setTextSize(12f);
+        statusView.setTextSize(11f);
+        statusView.setSingleLine(false);
+        statusView.setHorizontallyScrolling(false);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
-                dp(220),
+                LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         statusParams.setMargins(0, dp(4), 0, dp(8));
         parameterView.addView(statusView, statusParams);
@@ -271,41 +269,40 @@ public final class StatusOverlay {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout firstRow = makeButtonRow();
 
         previewButton = makeSmallButton("开启预览");
         previewButton.setOnClickListener(v -> onPreviewClick.run());
-        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
-        previewParams.setMargins(0, dp(6), dp(6), 0);
-        row.addView(previewButton, previewParams);
+        firstRow.addView(previewButton, makeGridButtonParams(true));
 
         noClickButton = makeSmallButton("不点击");
         noClickButton.setOnClickListener(v -> onNoClickClick.run());
-        LinearLayout.LayoutParams noClickParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
-        noClickParams.setMargins(0, dp(6), dp(6), 0);
-        row.addView(noClickButton, noClickParams);
+        firstRow.addView(noClickButton, makeGridButtonParams(true));
 
         autoSoloButton = makeSmallButton("单人开");
         autoSoloButton.setOnClickListener(v -> onAutoSoloClick.run());
-        LinearLayout.LayoutParams autoSoloParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
-        autoSoloParams.setMargins(0, dp(6), dp(6), 0);
-        row.addView(autoSoloButton, autoSoloParams);
+        firstRow.addView(autoSoloButton, makeGridButtonParams(false));
         setAutoSoloMode(autoSoloMode);
+
+        contentView.addView(firstRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout secondRow = makeButtonRow();
 
         detailsButton = makeSmallButton("显示参数");
         detailsButton.setOnClickListener(v -> setParametersVisible(!parametersVisible));
-        LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
-        detailsParams.setMargins(0, dp(6), dp(6), 0);
-        row.addView(detailsButton, detailsParams);
+        secondRow.addView(detailsButton, makeGridButtonParams(true));
+
+        debugDisplayButton = makeSmallButton("调试显示");
+        debugDisplayButton.setOnClickListener(v -> onDebugDisplayClick.run());
+        secondRow.addView(debugDisplayButton, makeGridButtonParams(true));
 
         Button stop = makeSmallButton("停止");
         stop.setOnClickListener(v -> onStopClick.run());
-        LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(0, dp(38), 1f);
-        stopParams.setMargins(0, dp(6), 0, 0);
-        row.addView(stop, stopParams);
+        secondRow.addView(stop, makeGridButtonParams(false));
 
-        contentView.addView(row, new LinearLayout.LayoutParams(
+        contentView.addView(secondRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         root.addView(contentView, new LinearLayout.LayoutParams(
@@ -321,8 +318,23 @@ public final class StatusOverlay {
         button.setAllCaps(false);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
-        button.setPadding(dp(6), 0, dp(6), 0);
+        button.setTextSize(11f);
+        button.setSingleLine(false);
+        button.setPadding(dp(3), 0, dp(3), 0);
         return button;
+    }
+
+    private LinearLayout makeButtonRow() {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        return row;
+    }
+
+    private LinearLayout.LayoutParams makeGridButtonParams(boolean hasRightMargin) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(36), 1f);
+        params.setMargins(0, dp(6), hasRightMargin ? dp(5) : 0, 0);
+        return params;
     }
 
     private void setParametersVisible(boolean visible) {
@@ -406,6 +418,7 @@ public final class StatusOverlay {
     private void updateLayout() {
         if (windowManager != null && rootView != null && params != null) {
             try {
+                params.width = collapsed ? WindowManager.LayoutParams.WRAP_CONTENT : overlayWidthPx();
                 windowManager.updateViewLayout(rootView, params);
             } catch (IllegalArgumentException ignored) {
             }
@@ -465,5 +478,13 @@ public final class StatusOverlay {
 
     private int dp(int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
+    }
+
+    private int overlayWidthPx() {
+        float density = context.getResources().getDisplayMetrics().density;
+        int screenWidthDp = Math.round(context.getResources().getDisplayMetrics().widthPixels / density);
+        int targetDp = Math.round(screenWidthDp * 0.58f);
+        targetDp = Math.max(MIN_OVERLAY_WIDTH_DP, Math.min(MAX_OVERLAY_WIDTH_DP, targetDp));
+        return dp(targetDp);
     }
 }

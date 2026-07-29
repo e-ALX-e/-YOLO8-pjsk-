@@ -7,6 +7,7 @@ import android.util.Log;
 
 import com.pjsk.autoplayer.core.Config;
 import com.pjsk.autoplayer.core.Detection;
+import com.pjsk.autoplayer.settings.AppSettings;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,11 +16,16 @@ public final class NcnnDetector {
     private static final String TAG = "PJSK-NCNN";
     private static final String NOTE_PARAM_PATH = "model_ncnn_model/model.ncnn.param";
     private static final String NOTE_BIN_PATH = "model_ncnn_model/model.ncnn.bin";
+    private static final String RETRAINED_PARAM_PATH = "note_retrained_ncnn_model/model.ncnn.param";
+    private static final String RETRAINED_BIN_PATH = "note_retrained_ncnn_model/model.ncnn.bin";
+    private static final String INT8_PARAM_PATH = "note_int8_ncnn_model/model.int8.param";
+    private static final String INT8_BIN_PATH = "note_int8_ncnn_model/model.int8.bin";
 
     private boolean nativeAvailable;
     private String status = "native library not loaded";
     private long nativeHandle;
     private static boolean libraryLoaded;
+    private final String modelLabel;
 
     static {
         try {
@@ -33,12 +39,46 @@ public final class NcnnDetector {
     public NcnnDetector(Context context) {
         this(
                 context,
-                NOTE_PARAM_PATH,
-                NOTE_BIN_PATH,
+                noteParamPath(AppSettings.getNoteModelMode(context)),
+                noteBinPath(AppSettings.getNoteModelMode(context)),
                 4,
                 Config.MODEL_CONFIDENCE,
                 Config.NMS_IOU,
                 Config.MODEL_IMAGE_SIZE);
+    }
+
+    private static String noteParamPath(int mode) {
+        switch (mode) {
+            case AppSettings.NOTE_MODEL_RETRAINED:
+                return RETRAINED_PARAM_PATH;
+            case AppSettings.NOTE_MODEL_INT8:
+                return INT8_PARAM_PATH;
+            case AppSettings.NOTE_MODEL_ORIGINAL:
+            default:
+                return NOTE_PARAM_PATH;
+        }
+    }
+
+    private static String noteBinPath(int mode) {
+        switch (mode) {
+            case AppSettings.NOTE_MODEL_RETRAINED:
+                return RETRAINED_BIN_PATH;
+            case AppSettings.NOTE_MODEL_INT8:
+                return INT8_BIN_PATH;
+            case AppSettings.NOTE_MODEL_ORIGINAL:
+            default:
+                return NOTE_BIN_PATH;
+        }
+    }
+
+    private static String noteModelLabel(String paramPath) {
+        if (RETRAINED_PARAM_PATH.equals(paramPath)) {
+            return "重训模型";
+        }
+        if (INT8_PARAM_PATH.equals(paramPath)) {
+            return "量化模型";
+        }
+        return "原版模型";
     }
 
     public NcnnDetector(
@@ -49,6 +89,7 @@ public final class NcnnDetector {
             float confidence,
             float iou,
             int inputSize) {
+        modelLabel = noteModelLabel(paramPath);
         if (!libraryLoaded) {
             nativeAvailable = false;
             status = "native library not loaded; detector stub active";
@@ -65,7 +106,7 @@ public final class NcnnDetector {
                     iou,
                     inputSize);
             nativeAvailable = nativeHandle != 0L;
-            status = nativeStatus(nativeHandle);
+            status = modelLabel + " " + nativeStatus(nativeHandle);
         } catch (Throwable t) {
             nativeAvailable = false;
             status = "NCNN unavailable: " + t.getMessage();
