@@ -58,17 +58,28 @@ public final class MainActivity extends Activity {
     private static final int COLOR_PRIMARY = Color.rgb(43, 169, 156);
     private static final int COLOR_DANGER = Color.rgb(222, 93, 106);
 
+    /** Keeps the text state and the switch visually separate but synchronized. */
+    private static final class RuntimeToggleControl {
+        final TextView stateView;
+        final Switch toggle;
+
+        RuntimeToggleControl(TextView stateView, Switch toggle) {
+            this.stateView = stateView;
+            this.toggle = toggle;
+        }
+    }
+
     private TextView statusView;
     private TextView overlayStatusView;
     private TextView calibrationValueView;
     private TextView touchMappingView;
     private TextView noteModelView;
     private TextView customOverlayActionView;
-    private Switch overlayVisibilitySwitch;
-    private Switch overlayCollapseSwitch;
-    private Switch overlayParametersSwitch;
-    private Switch overlayDebugSwitch;
-    private Switch overlayRecordingSwitch;
+    private RuntimeToggleControl overlayVisibilitySwitch;
+    private RuntimeToggleControl overlayCollapseSwitch;
+    private RuntimeToggleControl overlayParametersSwitch;
+    private RuntimeToggleControl overlayDebugSwitch;
+    private RuntimeToggleControl overlayRecordingSwitch;
     private SeekBar calibrationSeekBar;
     private Switch previewSwitch;
     private Switch noClickSwitch;
@@ -667,7 +678,7 @@ public final class MainActivity extends Activity {
                     ? "\u72b6\u6001\uff1a\u5df2\u5237\u65b0 " + count + " \u4e2a\u8c31\u9762\u5e8f\u53f7"
                     : "\u72b6\u6001\uff1a\u672a\u627e\u5230\u7b26\u5408\u547d\u540d\u89c4\u5219\u7684\u8c31\u9762\u6587\u4ef6");
         });
-        buttonRow.addView(refresh, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        buttonRow.addView(refresh, new LinearLayout.LayoutParams(0, dp(50), 1f));
 
         Button apply = new Button(this);
         apply.setText("\u5e94\u7528\u5f53\u524d\u8c31\u9762");
@@ -680,7 +691,7 @@ public final class MainActivity extends Activity {
                 statusView.setText("\u72b6\u6001\uff1a\u5df2\u5e94\u7528\u8c31\u9762 " + songId + " " + difficulty);
             }
         });
-        LinearLayout.LayoutParams applyParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        LinearLayout.LayoutParams applyParams = new LinearLayout.LayoutParams(0, dp(50), 1f);
         applyParams.setMargins(dp(8), 0, 0, 0);
         buttonRow.addView(apply, applyParams);
 
@@ -902,7 +913,7 @@ public final class MainActivity extends Activity {
                 statusView.setText("\u72b6\u6001\uff1a\u903b\u8f91\u5df2\u5bfc\u51fa\u5230\u526a\u8d34\u677f");
             }
         });
-        row.addView(export, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        row.addView(export, new LinearLayout.LayoutParams(0, dp(50), 1f));
 
         Button importProfiles = new Button(this);
         importProfiles.setText("\u5bfc\u5165\u903b\u8f91");
@@ -919,7 +930,7 @@ public final class MainActivity extends Activity {
             updateLogicProfileUi();
             statusView.setText(ok ? "\u72b6\u6001\uff1a\u903b\u8f91\u5bfc\u5165\u6210\u529f" : "\u72b6\u6001\uff1a\u526a\u8d34\u677f\u6ca1\u6709\u6709\u6548\u903b\u8f91 JSON");
         });
-        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(0, dp(50), 1f);
         importParams.setMargins(dp(8), 0, 0, 0);
         row.addView(importProfiles, importParams);
 
@@ -1040,7 +1051,7 @@ public final class MainActivity extends Activity {
         up.setText("上移");
         up.setAllCaps(false);
         up.setOnClickListener(v -> adjustActionY(-2.0));
-        row.addView(up, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        row.addView(up, new LinearLayout.LayoutParams(0, dp(50), 1f));
 
         Button reset = new Button(this);
         reset.setText("重置");
@@ -1050,7 +1061,7 @@ public final class MainActivity extends Activity {
             updateCalibrationUi();
             statusView.setText("状态：判定点已重置");
         });
-        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(0, dp(50), 1f);
         resetParams.setMargins(dp(8), 0, dp(8), 0);
         row.addView(reset, resetParams);
 
@@ -1058,7 +1069,7 @@ public final class MainActivity extends Activity {
         down.setText("下移");
         down.setAllCaps(false);
         down.setOnClickListener(v -> adjustActionY(2.0));
-        row.addView(down, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        row.addView(down, new LinearLayout.LayoutParams(0, dp(50), 1f));
 
         LinearLayout.LayoutParams rowParams = matchWrap();
         rowParams.setMargins(0, dp(6), 0, 0);
@@ -1221,17 +1232,14 @@ public final class MainActivity extends Activity {
         overlayVisibilitySwitch = addOverlayRuntimeSwitchRow(
                 root,
                 "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3",
-                "\u663e\u793a",
                 CaptureService.ACTION_TOGGLE_OVERLAY_VISIBILITY);
         overlayCollapseSwitch = addOverlayRuntimeSwitchRow(
                 root,
                 "\u6298\u53e0/\u5c55\u5f00\u5c0f\u7a97\u53e3",
-                "\u6298\u53e0",
                 CaptureService.ACTION_TOGGLE_OVERLAY_COLLAPSE);
         overlayParametersSwitch = addOverlayRuntimeSwitchRow(
                 root,
                 "\u663e\u793a/\u9690\u85cf\u5c0f\u7a97\u53e3\u53c2\u6570",
-                "\u53c2\u6570",
                 CaptureService.ACTION_TOGGLE_OVERLAY_PARAMETERS);
         addOverlayRuntimeActionRow(root,
                 "\u91cd\u7f6e\u8fd0\u884c\u72b6\u6001",
@@ -1240,26 +1248,23 @@ public final class MainActivity extends Activity {
         overlayDebugSwitch = addOverlayRuntimeSwitchRow(
                 root,
                 "\u5f00\u5173\u8c03\u8bd5\u663e\u793a",
-                "\u8c03\u8bd5",
                 CaptureService.ACTION_TOGGLE_DEBUG_DISPLAY);
         overlayRecordingSwitch = addOverlayRuntimeSwitchRow(
                 root,
                 "\u5f00\u59cb/\u7ed3\u675f\u5f55\u5c4f",
-                "\u5f55\u5c4f",
                 CaptureService.ACTION_TOGGLE_SCREEN_RECORDING);
         updateOverlayRuntimeStateUi();
     }
 
-    private Switch addOverlayRuntimeSwitchRow(
+    private RuntimeToggleControl addOverlayRuntimeSwitchRow(
             LinearLayout root,
             String label,
-            String switchLabel,
             String action) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(12), 0, dp(7), 0);
-        row.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 9));
+        row.setPadding(dp(16), 0, dp(12), 0);
+        row.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 10));
 
         Button button = new Button(this);
         button.setText(label);
@@ -1271,23 +1276,38 @@ public final class MainActivity extends Activity {
                 0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
         row.addView(button, buttonParams);
 
+        LinearLayout stateArea = new LinearLayout(this);
+        stateArea.setOrientation(LinearLayout.HORIZONTAL);
+        stateArea.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+
+        TextView stateView = new TextView(this);
+        stateView.setTextColor(COLOR_MUTED);
+        stateView.setTextSize(13f);
+        stateView.setTypeface(Typeface.DEFAULT_BOLD);
+        stateView.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        stateView.setSingleLine(true);
+        stateArea.addView(stateView, new LinearLayout.LayoutParams(dp(66),
+                LinearLayout.LayoutParams.MATCH_PARENT));
+
         Switch toggle = new Switch(this);
         toggle.setTag("inline-toggle");
-        toggle.setText(switchLabel);
+        toggle.setShowText(false);
         toggle.setGravity(Gravity.CENTER);
         toggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (!updatingOverlayRuntimeSwitches) {
                 toggleOverlayRuntimeAction(action);
             }
         });
-        LinearLayout.LayoutParams toggleParams = new LinearLayout.LayoutParams(
-                dp(94), LinearLayout.LayoutParams.MATCH_PARENT);
-        row.addView(toggle, toggleParams);
+        stateArea.addView(toggle, new LinearLayout.LayoutParams(dp(62),
+                LinearLayout.LayoutParams.MATCH_PARENT));
+        LinearLayout.LayoutParams stateParams = new LinearLayout.LayoutParams(
+                dp(140), LinearLayout.LayoutParams.MATCH_PARENT);
+        row.addView(stateArea, stateParams);
         LinearLayout.LayoutParams rowParams = matchWrap();
-        rowParams.height = dp(44);
-        rowParams.setMargins(0, dp(6), 0, 0);
+        rowParams.height = dp(58);
+        rowParams.setMargins(0, dp(8), 0, 0);
         root.addView(row, rowParams);
-        return toggle;
+        return new RuntimeToggleControl(stateView, toggle);
     }
 
     private void addOverlayRuntimeActionRow(
@@ -1298,8 +1318,8 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(12), 0, dp(14), 0);
-        row.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 9));
+        row.setPadding(dp(16), 0, dp(12), 0);
+        row.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 10));
 
         Button button = new Button(this);
         button.setText(label);
@@ -1314,15 +1334,15 @@ public final class MainActivity extends Activity {
         TextView actionView = new TextView(this);
         actionView.setText(actionLabel);
         actionView.setTextColor(COLOR_PRIMARY);
-        actionView.setTextSize(12f);
+        actionView.setTextSize(13f);
         actionView.setTypeface(Typeface.DEFAULT_BOLD);
         actionView.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(
-                dp(94), LinearLayout.LayoutParams.MATCH_PARENT);
+                dp(140), LinearLayout.LayoutParams.MATCH_PARENT);
         row.addView(actionView, actionParams);
         LinearLayout.LayoutParams rowParams = matchWrap();
-        rowParams.height = dp(44);
-        rowParams.setMargins(0, dp(6), 0, 0);
+        rowParams.height = dp(58);
+        rowParams.setMargins(0, dp(8), 0, 0);
         root.addView(row, rowParams);
     }
 
@@ -1342,25 +1362,31 @@ public final class MainActivity extends Activity {
         boolean parametersVisible = AppSettings.isOverlayParametersVisible(this);
         boolean debugEnabled = AppSettings.isDebugDisplayEnabled(this);
         updatingOverlayRuntimeSwitches = true;
-        setOverlayRuntimeSwitch(overlayVisibilitySwitch, !hidden, hidden
+        setOverlayRuntimeSwitch(overlayVisibilitySwitch, !hidden, hidden ? "\u5df2\u9690\u85cf" : "\u5df2\u663e\u793a", hidden
                 ? Color.rgb(190, 92, 70) : Color.rgb(33, 133, 91));
-        setOverlayRuntimeSwitch(overlayCollapseSwitch, collapsed, collapsed
+        setOverlayRuntimeSwitch(overlayCollapseSwitch, collapsed, collapsed ? "\u5df2\u6298\u53e0" : "\u5df2\u5c55\u5f00", collapsed
                 ? Color.rgb(184, 126, 55) : COLOR_MUTED);
-        setOverlayRuntimeSwitch(overlayParametersSwitch, parametersVisible, parametersVisible
+        setOverlayRuntimeSwitch(overlayParametersSwitch, parametersVisible, parametersVisible ? "\u5df2\u663e\u793a" : "\u5df2\u9690\u85cf", parametersVisible
                 ? Color.rgb(33, 133, 91) : COLOR_MUTED);
-        setOverlayRuntimeSwitch(overlayDebugSwitch, debugEnabled, debugEnabled
+        setOverlayRuntimeSwitch(overlayDebugSwitch, debugEnabled, debugEnabled ? "\u5df2\u5f00\u542f" : "\u5df2\u5173\u95ed", debugEnabled
                 ? Color.rgb(33, 133, 91) : COLOR_MUTED);
-        setOverlayRuntimeSwitch(overlayRecordingSwitch, CaptureService.isScreenRecording(),
-                CaptureService.isScreenRecording() ? Color.rgb(222, 93, 106) : COLOR_MUTED);
+        boolean recording = CaptureService.isScreenRecording();
+        setOverlayRuntimeSwitch(overlayRecordingSwitch, recording, recording ? "\u5f55\u5236\u4e2d" : "\u672a\u5f55\u5236",
+                recording ? Color.rgb(222, 93, 106) : COLOR_MUTED);
         updatingOverlayRuntimeSwitches = false;
     }
 
-    private void setOverlayRuntimeSwitch(Switch control, boolean checked, int accent) {
+    private void setOverlayRuntimeSwitch(
+            RuntimeToggleControl control,
+            boolean checked,
+            String state,
+            int accent) {
         if (control == null) {
             return;
         }
-        control.setChecked(checked);
-        control.setTextColor(accent);
+        control.toggle.setChecked(checked);
+        control.stateView.setText(state);
+        control.stateView.setTextColor(accent);
     }
 
     /** Stores meaningful overlay choices even before the capture service exists. */
@@ -1545,7 +1571,7 @@ public final class MainActivity extends Activity {
         view.setTextColor(COLOR_TEXT);
         view.setTextSize(14f);
         view.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        view.setMinHeight(dp(42));
+        view.setMinHeight(dp(48));
         view.setPadding(dp(12), dp(6), dp(12), dp(6));
         view.setBackground(makeRoundedBackground(COLOR_SURFACE, COLOR_BORDER, 8));
     }
@@ -1607,19 +1633,19 @@ public final class MainActivity extends Activity {
     private LinearLayout.LayoutParams buttonParams() {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46));
-        params.setMargins(0, dp(7), 0, 0);
+                dp(54));
+        params.setMargins(0, dp(8), 0, 0);
         return params;
     }
 
     private LinearLayout.LayoutParams actionButtonParams(boolean hasRightMargin) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(54), 1f);
         params.setMargins(0, 0, hasRightMargin ? dp(8) : 0, 0);
         return params;
     }
 
     private LinearLayout.LayoutParams pageTabParams(boolean hasRightMargin) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(40), 1f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1f);
         params.setMargins(0, 0, hasRightMargin ? dp(6) : 0, 0);
         return params;
     }
