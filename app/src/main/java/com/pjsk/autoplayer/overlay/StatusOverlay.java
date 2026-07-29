@@ -1,8 +1,11 @@
 package com.pjsk.autoplayer.overlay;
 
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -34,8 +37,10 @@ public final class StatusOverlay {
     private static final int MAX_OVERLAY_WIDTH_DP = 250;
     private static final int PARAMETER_PANEL_WIDTH_DP = 218;
     private static final int PARAMETER_PANEL_GAP_DP = 8;
-    // Exactly three 36dp button rows plus their 6dp top gaps: show nine main controls only.
-    private static final int CONTROL_AREA_HEIGHT_DP = 126;
+    private static final int GRID_BUTTON_HEIGHT_DP = 36;
+    private static final int GRID_BUTTON_GAP_DP = 6;
+    // Three complete button rows, with room for the full lower stroke and rounded corners.
+    private static final int CONTROL_AREA_HEIGHT_DP = 132;
     private static final int COLOR_BUTTON = Color.rgb(44, 53, 68);
     private static final int COLOR_BUTTON_BORDER = Color.rgb(84, 99, 122);
     private static final int COLOR_BUTTON_TEXT = Color.rgb(238, 244, 250);
@@ -743,7 +748,7 @@ public final class StatusOverlay {
      * this keeps every button's background and touch area inside the same explicit bounds.
      */
     private TextView makeSmallButton(String text) {
-        TextView button = new TextView(context);
+        TextView button = new OverlayActionButton(context);
         button.setText(text);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
@@ -754,7 +759,6 @@ public final class StatusOverlay {
         button.setPadding(dp(3), 0, dp(3), 0);
         button.setClickable(true);
         button.setFocusable(true);
-        button.setBackground(makeButtonBackground(COLOR_BUTTON, COLOR_BUTTON_BORDER));
         return button;
     }
 
@@ -766,9 +770,41 @@ public final class StatusOverlay {
     }
 
     private LinearLayout.LayoutParams makeGridButtonParams(boolean hasRightMargin) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(36), 1f);
-        params.setMargins(0, dp(6), hasRightMargin ? dp(5) : 0, 0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(GRID_BUTTON_HEIGHT_DP), 1f);
+        params.setMargins(0, dp(GRID_BUTTON_GAP_DP), hasRightMargin ? dp(5) : 0, dp(2));
         return params;
+    }
+
+    /** Draws the full rounded outline inside its own bounds, including the lower corners. */
+    private final class OverlayActionButton extends TextView {
+        private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF bounds = new RectF();
+
+        OverlayActionButton(Context context) {
+            super(context);
+            fillPaint.setColor(COLOR_BUTTON);
+            strokePaint.setColor(COLOR_BUTTON_BORDER);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeWidth(dp(1));
+            setBackgroundColor(Color.TRANSPARENT);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            float inset = strokePaint.getStrokeWidth() / 2f;
+            bounds.set(inset, inset, getWidth() - inset, getHeight() - inset);
+            float radius = dp(7);
+            canvas.drawRoundRect(bounds, radius, radius, fillPaint);
+            canvas.drawRoundRect(bounds, radius, radius, strokePaint);
+            super.onDraw(canvas);
+        }
+
+        @Override
+        public boolean performClick() {
+            super.performClick();
+            return true;
+        }
     }
 
     private void setParametersVisible(boolean visible) {
