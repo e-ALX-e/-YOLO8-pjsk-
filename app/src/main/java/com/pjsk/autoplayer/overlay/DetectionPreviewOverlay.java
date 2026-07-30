@@ -37,7 +37,6 @@ public final class DetectionPreviewOverlay {
     private static final long PREVIEW_INTERVAL_MS = 83;
     private static final int PREVIEW_WIDTH_DP = 280;
     private static final int PREVIEW_HEIGHT_DP = 158;
-    private static final int PREVIEW_ANCHOR_GAP_DP = 16;
     private static final int COLOR_PANEL = Color.rgb(22, 28, 39);
     private static final int COLOR_PANEL_BORDER = Color.rgb(164, 183, 211);
     private static final int COLOR_BUTTON = Color.rgb(44, 53, 68);
@@ -61,7 +60,7 @@ public final class DetectionPreviewOverlay {
 
     public DetectionPreviewOverlay(Context context) {
         this.context = context.getApplicationContext();
-        anchorX = dp(250 + PREVIEW_ANCHOR_GAP_DP);
+        anchorX = dp(258);
         anchorY = 0;
     }
 

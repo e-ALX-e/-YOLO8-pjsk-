@@ -37,8 +37,7 @@ public final class StatusOverlay {
     private static final int MIN_OVERLAY_WIDTH_DP = 210;
     private static final int MAX_OVERLAY_WIDTH_DP = 250;
     private static final int PARAMETER_PANEL_WIDTH_DP = 218;
-    // Keep independently opened panels visually separate from the main overlay.
-    private static final int PARAMETER_PANEL_GAP_DP = 16;
+    private static final int PARAMETER_PANEL_GAP_DP = 8;
     private static final int GRID_BUTTON_HEIGHT_DP = 36;
     private static final int GRID_BUTTON_GAP_DP = 6;
     // Three complete button rows plus a small breathing gap below the last row.
