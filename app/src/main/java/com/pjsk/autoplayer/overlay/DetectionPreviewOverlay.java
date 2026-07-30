@@ -19,8 +19,8 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.Button;
 import android.widget.TextView;
 
 import com.pjsk.autoplayer.core.Config;
@@ -35,19 +35,21 @@ import java.util.Locale;
 public final class DetectionPreviewOverlay {
     private static final String TAG = "PJSK-PreviewOverlay";
     private static final long PREVIEW_INTERVAL_MS = 83;
-
+    private static final int PREVIEW_WIDTH_DP = 280;
+    private static final int PREVIEW_HEIGHT_DP = 158;
+    private static final int COLOR_PANEL = Color.rgb(22, 28, 39);
+    private static final int COLOR_PANEL_BORDER = Color.rgb(164, 183, 211);
+    private static final int COLOR_BUTTON = Color.rgb(44, 53, 68);
+    private static final int COLOR_BUTTON_BORDER = Color.rgb(84, 99, 122);
+    private static final int COLOR_BUTTON_TEXT = Color.rgb(238, 244, 250);
     private final Context context;
-    private final Runnable onCloseClick;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private WindowManager windowManager;
     private WindowManager.LayoutParams params;
     private LinearLayout rootView;
     private PreviewView previewView;
-    private TextView calibrationView;
-    private Button calibrationLockButton;
     private long lastPreviewMs;
-    private boolean calibrationLocked = true;
     private int anchorX;
     private int anchorY;
 
@@ -56,10 +58,9 @@ public final class DetectionPreviewOverlay {
     private float downRawX;
     private float downRawY;
 
-    public DetectionPreviewOverlay(Context context, Runnable onCloseClick) {
+    public DetectionPreviewOverlay(Context context) {
         this.context = context.getApplicationContext();
-        this.onCloseClick = onCloseClick;
-        anchorX = dp(268);
+        anchorX = dp(258);
         anchorY = 0;
     }
 
@@ -102,8 +103,6 @@ public final class DetectionPreviewOverlay {
             }
             rootView = null;
             previewView = null;
-            calibrationView = null;
-            calibrationLockButton = null;
             params = null;
         });
     }
@@ -170,7 +169,6 @@ public final class DetectionPreviewOverlay {
                         actionYBase,
                         stats,
                         buttonLabels);
-                updateCalibrationView();
             } else {
                 previewBitmap.recycle();
             }
@@ -211,8 +209,6 @@ public final class DetectionPreviewOverlay {
             Log.e(TAG, "failed to show preview overlay", e);
             rootView = null;
             previewView = null;
-            calibrationView = null;
-            calibrationLockButton = null;
             params = null;
         }
     }
@@ -220,18 +216,19 @@ public final class DetectionPreviewOverlay {
     private LinearLayout buildView() {
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(10), dp(8), dp(10), dp(10));
+        root.setPadding(dp(6), dp(6), dp(6), dp(6));
         root.setBackground(makeBackground());
         root.setOnTouchListener((view, event) -> handleDrag(event));
 
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setVisibility(View.GONE);
 
         TextView title = new TextView(context);
         title.setText("识别预览");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(14f);
+        title.setTextColor(Color.rgb(151, 210, 255));
+        title.setTextSize(13f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         header.addView(title, new LinearLayout.LayoutParams(
                 0,
@@ -243,133 +240,33 @@ public final class DetectionPreviewOverlay {
         close.setAllCaps(false);
         close.setMinHeight(0);
         close.setMinimumHeight(0);
-        close.setPadding(dp(8), 0, dp(8), 0);
-        close.setOnClickListener(v -> onCloseClick.run());
-        header.addView(close, new LinearLayout.LayoutParams(dp(72), dp(34)));
+        close.setTextSize(11f);
+        close.setTextColor(COLOR_BUTTON_TEXT);
+        close.setPadding(dp(4), 0, dp(4), 0);
+        close.setBackground(makeButtonBackground(COLOR_BUTTON, COLOR_BUTTON_BORDER));
+        close.setOnClickListener(v -> {});
+        header.addView(close, new LinearLayout.LayoutParams(dp(52), dp(30)));
 
         root.addView(header, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         previewView = new PreviewView(context, this::setActionYFromPreview);
-        previewView.setCalibrationLocked(calibrationLocked);
-        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(dp(360), dp(210));
-        previewParams.setMargins(0, dp(8), 0, 0);
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                dp(PREVIEW_WIDTH_DP),
+                dp(PREVIEW_HEIGHT_DP));
         root.addView(previewView, previewParams);
-
-        root.addView(buildCalibrationControls(), new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        updateCalibrationView();
 
         return root;
     }
 
-    private LinearLayout buildCalibrationControls() {
-        LinearLayout wrapper = new LinearLayout(context);
-        wrapper.setOrientation(LinearLayout.VERTICAL);
-        wrapper.setPadding(0, dp(6), 0, 0);
-
-        calibrationView = new TextView(context);
-        calibrationView.setTextColor(Color.rgb(225, 232, 240));
-        calibrationView.setTextSize(12f);
-        calibrationView.setGravity(Gravity.CENTER);
-        wrapper.addView(calibrationView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        calibrationLockButton = makeCalibrationButton("");
-        calibrationLockButton.setOnClickListener(v -> setCalibrationLocked(!calibrationLocked));
-        LinearLayout.LayoutParams lockParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(32));
-        lockParams.setMargins(0, dp(4), 0, 0);
-        wrapper.addView(calibrationLockButton, lockParams);
-        updateCalibrationLockButton();
-
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER);
-
-        Button up = makeCalibrationButton("上移");
-        up.setOnClickListener(v -> adjustActionY(-2.0));
-        row.addView(up, new LinearLayout.LayoutParams(0, dp(32), 1f));
-
-        Button reset = makeCalibrationButton("重置");
-        reset.setOnClickListener(v -> {
-            AppSettings.resetActionY(context);
-            refreshActionY();
-        });
-        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(0, dp(32), 1f);
-        resetParams.setMargins(dp(6), 0, dp(6), 0);
-        row.addView(reset, resetParams);
-
-        Button down = makeCalibrationButton("下移");
-        down.setOnClickListener(v -> adjustActionY(2.0));
-        row.addView(down, new LinearLayout.LayoutParams(0, dp(32), 1f));
-
-        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        rowParams.setMargins(0, dp(4), 0, 0);
-        wrapper.addView(row, rowParams);
-        return wrapper;
-    }
-
-    private Button makeCalibrationButton(String text) {
-        Button button = new Button(context);
-        button.setText(text);
-        button.setTextSize(12f);
-        button.setAllCaps(false);
-        button.setMinHeight(0);
-        button.setMinimumHeight(0);
-        button.setPadding(dp(4), 0, dp(4), 0);
-        return button;
-    }
-
-    private void adjustActionY(double delta) {
-        if (calibrationLocked) {
-            return;
-        }
-        AppSettings.setActionY(context, AppSettings.getActionY(context) + delta);
-        refreshActionY();
-    }
-
     private void setActionYFromPreview(double actionYBase) {
-        if (calibrationLocked) {
+        if (AppSettings.isActionYCalibrationLocked(context)) {
             return;
         }
         AppSettings.setActionY(context, actionYBase);
-        refreshActionY();
-    }
-
-    private void refreshActionY() {
         if (previewView != null) {
             previewView.setActionYBase(AppSettings.getActionY(context));
-        }
-        updateCalibrationView();
-    }
-
-    private void updateCalibrationView() {
-        if (calibrationView != null) {
-            calibrationView.setText(String.format(
-                    Locale.US,
-                    "判定点 %.0f",
-                    AppSettings.getActionY(context)));
-        }
-    }
-
-    private void setCalibrationLocked(boolean locked) {
-        calibrationLocked = locked;
-        if (previewView != null) {
-            previewView.setCalibrationLocked(locked);
-        }
-        updateCalibrationLockButton();
-    }
-
-    private void updateCalibrationLockButton() {
-        if (calibrationLockButton != null) {
-            calibrationLockButton.setText(calibrationLocked ? "解锁判定线" : "锁定判定线");
         }
     }
 
@@ -401,8 +298,8 @@ public final class DetectionPreviewOverlay {
     }
 
     private Bitmap makePreviewBitmap(Bitmap frame, int frameWidth, int frameHeight) {
-        int maxWidth = dp(360);
-        int maxHeight = dp(210);
+        int maxWidth = dp(PREVIEW_WIDTH_DP);
+        int maxHeight = dp(PREVIEW_HEIGHT_DP);
         float aspect = frameWidth / (float) Math.max(1, frameHeight);
         int targetWidth = maxWidth;
         int targetHeight = Math.max(1, Math.round(maxWidth / aspect));
@@ -434,9 +331,20 @@ public final class DetectionPreviewOverlay {
 
     private GradientDrawable makeBackground() {
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.argb(230, 18, 22, 30));
-        drawable.setCornerRadius(dp(8));
-        drawable.setStroke(dp(1), Color.argb(140, 255, 255, 255));
+        drawable.setColor(Color.argb(238, Color.red(COLOR_PANEL), Color.green(COLOR_PANEL), Color.blue(COLOR_PANEL)));
+        drawable.setCornerRadius(dp(10));
+        drawable.setStroke(dp(1), Color.argb(145,
+                Color.red(COLOR_PANEL_BORDER),
+                Color.green(COLOR_PANEL_BORDER),
+                Color.blue(COLOR_PANEL_BORDER)));
+        return drawable;
+    }
+
+    private GradientDrawable makeButtonBackground(int color, int borderColor) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(7));
+        drawable.setStroke(dp(1), borderColor);
         return drawable;
     }
 
@@ -466,7 +374,7 @@ public final class DetectionPreviewOverlay {
         }
     }
 
-    private static final class PreviewView extends View {
+    private final class PreviewView extends View {
         private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
         private final Paint boxPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -482,7 +390,6 @@ public final class DetectionPreviewOverlay {
         private double actionYBase = Config.ACTION_Y_DEFAULT;
         private String stats = "waiting";
         private boolean buttonLabels;
-        private boolean calibrationLocked = true;
         private final CalibrationListener calibrationListener;
 
         PreviewView(Context context, CalibrationListener calibrationListener) {
@@ -529,11 +436,6 @@ public final class DetectionPreviewOverlay {
 
         void setActionYBase(double actionYBase) {
             this.actionYBase = AppSettings.clampActionY(actionYBase);
-            invalidate();
-        }
-
-        void setCalibrationLocked(boolean calibrationLocked) {
-            this.calibrationLocked = calibrationLocked;
             invalidate();
         }
 
@@ -624,7 +526,9 @@ public final class DetectionPreviewOverlay {
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
-            if (calibrationLocked) {
+            if (AppSettings.isActionYCalibrationLocked(getContext())) {
+                // With the action line locked, the preview surface moves its own window.
+                handleDrag(event);
                 return true;
             }
             if (event.getActionMasked() != MotionEvent.ACTION_DOWN

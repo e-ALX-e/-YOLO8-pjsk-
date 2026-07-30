@@ -1,8 +1,11 @@
 package com.pjsk.autoplayer.overlay;
 
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -13,9 +16,9 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.ArrayAdapter;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -35,7 +38,10 @@ public final class StatusOverlay {
     private static final int MAX_OVERLAY_WIDTH_DP = 250;
     private static final int PARAMETER_PANEL_WIDTH_DP = 218;
     private static final int PARAMETER_PANEL_GAP_DP = 8;
-    private static final int CONTROL_AREA_HEIGHT_DP = 150;
+    private static final int GRID_BUTTON_HEIGHT_DP = 36;
+    private static final int GRID_BUTTON_GAP_DP = 6;
+    // Three complete button rows plus a small breathing gap below the last row.
+    private static final int CONTROL_AREA_HEIGHT_DP = 138;
     private static final int COLOR_BUTTON = Color.rgb(44, 53, 68);
     private static final int COLOR_BUTTON_BORDER = Color.rgb(84, 99, 122);
     private static final int COLOR_BUTTON_TEXT = Color.rgb(238, 244, 250);
@@ -64,18 +70,20 @@ public final class StatusOverlay {
     private TextView statusTitleView;
     private TextView autoContinueStatusView;
     private TextView statusView;
-    private Button collapseButton;
-    private Button hideButton;
-    private Button detailsButton;
-    private Button previewButton;
-    private Button noClickButton;
-    private Button autoSoloButton;
-    private Button logicPlayButton;
-    private Button logicProfileButton;
-    private Button resetStateButton;
-    private Button screenRecordButton;
-    private Button customButton;
-    private Button debugDisplayButton;
+    private TextView collapseButton;
+    private TextView hideButton;
+    private TextView detailsButton;
+    private TextView previewButton;
+    private TextView noClickButton;
+    private TextView autoSoloButton;
+    private TextView logicPlayButton;
+    private TextView logicProfileButton;
+    private TextView resetStateButton;
+    private TextView screenRecordButton;
+    private TextView customButton;
+    private TextView debugDisplayButton;
+    private TextView calibrationStatusView;
+    private TextView calibrationLockButton;
     private Spinner logicSongSelector;
     private Spinner logicDifficultySelector;
     private ArrayAdapter<String> logicSongAdapter;
@@ -329,16 +337,16 @@ public final class StatusOverlay {
     }
 
     private LinearLayout buildView(String statusText) {
-        LinearLayout root = new LinearLayout(context);
+        LinearLayout root = new DraggableOverlayLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(10), dp(8), dp(10), dp(8));
         root.setBackground(makeBackground());
-        root.setOnTouchListener((view, event) -> handleDrag(event));
 
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-
+        // Keep a dependable drag handle even before calibration is locked.
+        header.setOnTouchListener((view, event) -> handleDrag(event));
         statusTitleView = new TextView(context);
         statusTitleView.setText("状态");
         statusTitleView.setTextSize(14f);
@@ -412,7 +420,8 @@ public final class StatusOverlay {
         ScrollView buttonScrollView = new ScrollView(context);
         buttonScrollView.setFillViewport(false);
         buttonScrollView.setVerticalScrollBarEnabled(true);
-        buttonScrollView.setClipToPadding(false);
+        buttonScrollView.setClipToPadding(true);
+        buttonScrollView.setClipChildren(true);
         LinearLayout buttonList = new LinearLayout(context);
         buttonList.setOrientation(LinearLayout.VERTICAL);
         buttonScrollView.addView(buttonList, new ScrollView.LayoutParams(
@@ -466,7 +475,7 @@ public final class StatusOverlay {
         logicProfileButton.setOnClickListener(v -> onLogicProfileClick.run());
         thirdRow.addView(logicProfileButton, makeGridButtonParams(true));
 
-        Button stop = makeSmallButton("\u505c\u6b62");
+        TextView stop = makeSmallButton("\u505c\u6b62");
         stop.setOnClickListener(v -> onStopClick.run());
         thirdRow.addView(stop, makeGridButtonParams(false));
 
@@ -535,10 +544,7 @@ public final class StatusOverlay {
         LinearLayout fourthRow = makeButtonRow();
         screenRecordButton = makeSmallButton("录屏");
         screenRecordButton.setOnClickListener(v -> onScreenRecordClick.run());
-        LinearLayout.LayoutParams recordParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(36));
-        recordParams.setMargins(0, dp(6), 0, 0);
-        fourthRow.addView(screenRecordButton, recordParams);
+        fourthRow.addView(screenRecordButton, makeWideButtonParams());
         buttonList.addView(fourthRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -547,13 +553,57 @@ public final class StatusOverlay {
         customButton = makeSmallButton("\u81ea\u5b9a\u4e49");
         customButton.setVisibility(View.GONE);
         customButton.setOnClickListener(v -> onCustomClick.run());
-        LinearLayout.LayoutParams customParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(36));
-        customParams.setMargins(0, dp(6), 0, 0);
-        fifthRow.addView(customButton, customParams);
+        fifthRow.addView(customButton, makeWideButtonParams());
         buttonList.addView(fifthRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout calibrationInfoRow = makeButtonRow();
+        calibrationStatusView = new TextView(context);
+        calibrationStatusView.setTextColor(Color.rgb(225, 232, 240));
+        calibrationStatusView.setTextSize(10.5f);
+        calibrationStatusView.setGravity(Gravity.CENTER_VERTICAL);
+        calibrationInfoRow.addView(calibrationStatusView, new LinearLayout.LayoutParams(
+                0, dp(30), 1f));
+
+        calibrationLockButton = makeSmallButton("");
+        calibrationLockButton.setOnClickListener(v -> {
+            AppSettings.setActionYCalibrationLocked(
+                    context,
+                    !AppSettings.isActionYCalibrationLocked(context));
+            refreshActionYCalibrationControls();
+        });
+        LinearLayout.LayoutParams calibrationLockParams = new LinearLayout.LayoutParams(dp(94), dp(30));
+        calibrationLockParams.setMargins(dp(6), 0, 0, 0);
+        calibrationInfoRow.addView(calibrationLockButton, calibrationLockParams);
+        LinearLayout.LayoutParams calibrationInfoParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        calibrationInfoParams.setMargins(0, dp(6), 0, 0);
+        buttonList.addView(calibrationInfoRow, calibrationInfoParams);
+
+        LinearLayout calibrationActionRow = makeButtonRow();
+        TextView calibrationUp = makeSmallButton("\u4e0a\u79fb");
+        calibrationUp.setOnClickListener(v -> adjustActionY(-1.0));
+        calibrationActionRow.addView(calibrationUp, makeGridButtonParams(true));
+
+        TextView calibrationReset = makeSmallButton("\u91cd\u7f6e");
+        calibrationReset.setOnClickListener(v -> {
+            if (AppSettings.isActionYCalibrationLocked(context)) {
+                return;
+            }
+            AppSettings.resetActionY(context);
+            refreshActionYCalibrationControls();
+        });
+        calibrationActionRow.addView(calibrationReset, makeGridButtonParams(true));
+
+        TextView calibrationDown = makeSmallButton("\u4e0b\u79fb");
+        calibrationDown.setOnClickListener(v -> adjustActionY(1.0));
+        calibrationActionRow.addView(calibrationDown, makeGridButtonParams(false));
+        buttonList.addView(calibrationActionRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        refreshActionYCalibrationControls();
 
         contentView.addView(buttonScrollView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -686,17 +736,23 @@ public final class StatusOverlay {
                 Color.rgb(123, 163, 207)));
     }
 
-    private Button makeSmallButton(String text) {
-        Button button = new Button(context);
+    /**
+     * Overlay buttons deliberately use a TextView instead of the platform Button widget.
+     * Some landscape overlay windows draw Button's built-in inset/foreground incorrectly;
+     * this keeps every button's background and touch area inside the same explicit bounds.
+     */
+    private TextView makeSmallButton(String text) {
+        TextView button = new OverlayActionButton(context);
         button.setText(text);
-        button.setAllCaps(false);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
         button.setTextSize(10.5f);
         button.setTextColor(COLOR_BUTTON_TEXT);
+        button.setGravity(Gravity.CENTER);
         button.setSingleLine(false);
         button.setPadding(dp(3), 0, dp(3), 0);
-        button.setBackground(makeButtonBackground(COLOR_BUTTON, COLOR_BUTTON_BORDER));
+        button.setClickable(true);
+        button.setFocusable(true);
         return button;
     }
 
@@ -708,9 +764,49 @@ public final class StatusOverlay {
     }
 
     private LinearLayout.LayoutParams makeGridButtonParams(boolean hasRightMargin) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(36), 1f);
-        params.setMargins(0, dp(6), hasRightMargin ? dp(5) : 0, 0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(GRID_BUTTON_HEIGHT_DP), 1f);
+        params.setMargins(0, dp(GRID_BUTTON_GAP_DP), hasRightMargin ? dp(5) : 0, dp(2));
         return params;
+    }
+
+    private LinearLayout.LayoutParams makeWideButtonParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(GRID_BUTTON_HEIGHT_DP));
+        params.setMargins(0, dp(GRID_BUTTON_GAP_DP), 0, dp(2));
+        return params;
+    }
+
+    /** Draws the full rounded outline inside its own bounds, including the lower corners. */
+    private final class OverlayActionButton extends TextView {
+        private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF bounds = new RectF();
+
+        OverlayActionButton(Context context) {
+            super(context);
+            fillPaint.setColor(COLOR_BUTTON);
+            strokePaint.setColor(COLOR_BUTTON_BORDER);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeWidth(dp(1));
+            setBackgroundColor(Color.TRANSPARENT);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            float inset = strokePaint.getStrokeWidth() / 2f;
+            bounds.set(inset, inset, getWidth() - inset, getHeight() - inset);
+            float radius = dp(7);
+            canvas.drawRoundRect(bounds, radius, radius, fillPaint);
+            canvas.drawRoundRect(bounds, radius, radius, strokePaint);
+            super.onDraw(canvas);
+        }
+
+        @Override
+        public boolean performClick() {
+            super.performClick();
+            return true;
+        }
     }
 
     private void setParametersVisible(boolean visible) {
@@ -888,6 +984,112 @@ public final class StatusOverlay {
         }
     }
 
+    /**
+     * After the action line is locked, a drag anywhere on the compact overlay moves it.
+     * A touch that stays still is still delivered to the original button.
+     */
+    private final class DraggableOverlayLayout extends LinearLayout {
+        private final int touchSlop;
+        private boolean tracking;
+        private boolean dragging;
+
+        DraggableOverlayLayout(Context context) {
+            super(context);
+            touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent event) {
+            if (!AppSettings.isActionYCalibrationLocked(context)) {
+                return false;
+            }
+
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    tracking = true;
+                    dragging = false;
+                    handleDrag(event);
+                    return false;
+
+                case MotionEvent.ACTION_MOVE:
+                    if (tracking && !dragging) {
+                        float dx = Math.abs(event.getRawX() - downRawX);
+                        float dy = Math.abs(event.getRawY() - downRawY);
+                        if (dx > touchSlop || dy > touchSlop) {
+                            dragging = true;
+                        }
+                    }
+                    if (dragging) {
+                        handleDrag(event);
+                        return true;
+                    }
+                    return false;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    tracking = false;
+                    dragging = false;
+                    return false;
+
+                default:
+                    return false;
+            }
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            if (!AppSettings.isActionYCalibrationLocked(context)) {
+                return super.onTouchEvent(event);
+            }
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    tracking = true;
+                    dragging = true;
+                    handleDrag(event);
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    handleDrag(event);
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    tracking = false;
+                    dragging = false;
+                    return true;
+
+                default:
+                    return true;
+            }
+        }
+    }
+
+    private void adjustActionY(double delta) {
+        if (AppSettings.isActionYCalibrationLocked(context)) {
+            return;
+        }
+        AppSettings.setActionY(context, AppSettings.getActionY(context) + delta);
+        refreshActionYCalibrationControls();
+    }
+
+    private void refreshActionYCalibrationControls() {
+        if (calibrationStatusView != null) {
+            calibrationStatusView.setText(String.format(
+                    Locale.US,
+                    "\u5224\u5b9a\u70b9 %.0f",
+                    AppSettings.getActionY(context)));
+        }
+        if (calibrationLockButton != null) {
+            boolean locked = AppSettings.isActionYCalibrationLocked(context);
+            calibrationLockButton.setText(locked
+                    ? "\u89e3\u9501\u5224\u5b9a\u7ebf"
+                    : "\u9501\u5b9a\u5224\u5b9a\u7ebf");
+            calibrationLockButton.setTextColor(locked
+                    ? Color.rgb(255, 194, 87)
+                    : Color.rgb(94, 232, 142));
+        }
+    }
+
     private void clearViews() {
         rootView = null;
         contentView = null;
@@ -907,6 +1109,8 @@ public final class StatusOverlay {
         screenRecordButton = null;
         customButton = null;
         debugDisplayButton = null;
+        calibrationStatusView = null;
+        calibrationLockButton = null;
         logicSongSelector = null;
         logicDifficultySelector = null;
         logicSongAdapter = null;
