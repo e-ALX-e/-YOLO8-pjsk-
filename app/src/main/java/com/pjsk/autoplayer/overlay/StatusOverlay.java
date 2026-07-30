@@ -16,6 +16,7 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
@@ -336,7 +337,7 @@ public final class StatusOverlay {
     }
 
     private LinearLayout buildView(String statusText) {
-        LinearLayout root = new LinearLayout(context);
+        LinearLayout root = new DraggableOverlayLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(10), dp(8), dp(10), dp(8));
         root.setBackground(makeBackground());
@@ -344,9 +345,8 @@ public final class StatusOverlay {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        // Keep dragging on the header so the control list can receive scroll gestures.
+        // Keep a dependable drag handle even before calibration is locked.
         header.setOnTouchListener((view, event) -> handleDrag(event));
-
         statusTitleView = new TextView(context);
         statusTitleView.setText("状态");
         statusTitleView.setTextSize(14f);
@@ -981,6 +981,86 @@ public final class StatusOverlay {
 
             default:
                 return false;
+        }
+    }
+
+    /**
+     * After the action line is locked, a drag anywhere on the compact overlay moves it.
+     * A touch that stays still is still delivered to the original button.
+     */
+    private final class DraggableOverlayLayout extends LinearLayout {
+        private final int touchSlop;
+        private boolean tracking;
+        private boolean dragging;
+
+        DraggableOverlayLayout(Context context) {
+            super(context);
+            touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent event) {
+            if (!AppSettings.isActionYCalibrationLocked(context)) {
+                return false;
+            }
+
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    tracking = true;
+                    dragging = false;
+                    handleDrag(event);
+                    return false;
+
+                case MotionEvent.ACTION_MOVE:
+                    if (tracking && !dragging) {
+                        float dx = Math.abs(event.getRawX() - downRawX);
+                        float dy = Math.abs(event.getRawY() - downRawY);
+                        if (dx > touchSlop || dy > touchSlop) {
+                            dragging = true;
+                        }
+                    }
+                    if (dragging) {
+                        handleDrag(event);
+                        return true;
+                    }
+                    return false;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    tracking = false;
+                    dragging = false;
+                    return false;
+
+                default:
+                    return false;
+            }
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            if (!AppSettings.isActionYCalibrationLocked(context)) {
+                return super.onTouchEvent(event);
+            }
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    tracking = true;
+                    dragging = true;
+                    handleDrag(event);
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    handleDrag(event);
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    tracking = false;
+                    dragging = false;
+                    return true;
+
+                default:
+                    return true;
+            }
         }
     }
 

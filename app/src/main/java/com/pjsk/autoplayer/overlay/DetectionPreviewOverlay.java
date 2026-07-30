@@ -374,7 +374,7 @@ public final class DetectionPreviewOverlay {
         }
     }
 
-    private static final class PreviewView extends View {
+    private final class PreviewView extends View {
         private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
         private final Paint boxPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -527,6 +527,8 @@ public final class DetectionPreviewOverlay {
         @Override
         public boolean onTouchEvent(MotionEvent event) {
             if (AppSettings.isActionYCalibrationLocked(getContext())) {
+                // With the action line locked, the preview surface moves its own window.
+                handleDrag(event);
                 return true;
             }
             if (event.getActionMasked() != MotionEvent.ACTION_DOWN
