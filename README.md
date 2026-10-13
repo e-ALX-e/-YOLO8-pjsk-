@@ -1,61 +1,63 @@
-# PJSK Native Auto Player
+# PJSK 音符识别云端训练资料
 
-这是手机端原生方案的工程骨架，目标是把原来电脑端的 `scrcpy + Python + ADB touch` 换成：
+本仓库用于使用已采集的游戏画面训练更准确、更轻量、适合安卓 NCNN 离线推理的音符检测模型。素材由仓库所有者个人采集，并已确认可以公开。
 
-- Android `MediaProjection` 手机本地抓屏
-- NCNN 手机本地推理
-- root 下 `/dev/input/event*` 触摸注入
-- Java 版轨迹追踪和动作判定
+## 云端如何开始
 
-## 当前状态
+在 Codex Cloud 中连接本仓库，选择更新后的 main 分支。在云端任务中发送：
 
-已迁移：
+> 请先阅读 AGENTS.md、README.md 和 CLOUD_TRAINING_PROMPT.md，核对 MANIFEST.json，然后按照提示词实际执行云端音符模型训练。只使用当前订阅内已有算力。
 
-- 录屏服务
-- 模型 JNI 接口
-- YOLOv8 NCNN 输出解码和 NMS
-- Python 版 `Config` 参数
-- Python 版 `LaneTracker` 核心追踪逻辑
-- Python 版 tap / hold / sweep / flick 动作逻辑
-- root `/dev/input/event*` 二进制触摸注入第一版
+已经创建的云端环境或任务需要刷新到包含这些文件的提交；仅选择旧环境而不刷新仓库，可能仍然看到旧安卓工程。云端直接读取本仓库内的相对路径，无需访问个人电脑的 D 盘。
 
-还需要本机环境：
+## 内容
 
-- Android Studio
-- Android SDK 36
-- Android NDK
-- CMake
-- NCNN Android SDK
+| 路径 | 用途 |
+| --- | --- |
+| data/images/ | 150 张原始 PNG 截图 |
+| data/labels/ | 150 份 YOLO 检测框标注 |
+| data/classes.txt | 四类音符的固定编号 |
+| weights/note_yolov8n_640.pt | 可用于新一轮微调的旧音符权重 |
+| baselines/original_ncnn/ | 安卓原版 NCNN 模型与导出元数据 |
+| baselines/int8_ncnn/ | 安卓已有 INT8 模型，用于轻量化对照 |
+| MANIFEST.json | 文件字节数、SHA-256、样本与类别统计、来源局限 |
+| DATASET.md | 数据格式、审核结果和划分注意事项 |
+| ANDROID_COMPATIBILITY.md | 安卓预处理、输出和后处理约定 |
+| SETUP.md | 云端 CPU 环境准备与完整性检查 |
+| CLOUD_TRAINING_PROMPT.md | 完整可执行任务提示词 |
 
-## 放置 NCNN SDK
+共 307 个素材/权重文件，总计 195,381,790 字节，约 195.4 MB。图片和标签直接存入 Git；不需要 Git LFS 或额外下载服务。原 173 MB 压缩包不重复上传。
 
-下载 NCNN Android Vulkan SDK 后，把 arm64-v8a 的头文件和库放到：
+## 已核实的数据
 
-```text
-app/src/main/cpp/ncnn/arm64-v8a/include/ncnn/net.h
-app/src/main/cpp/ncnn/arm64-v8a/lib/libncnn.a
-```
+150 张图片全部为 1826 × 859，标注共 2027 个框：
 
-如果没有放 NCNN SDK，工程仍然可以同步，但检测器会以空检测桩运行。
+| 编号 | 类别 | 标注框数 |
+| --- | --- | --- |
+| 0 | tap | 1383 |
+| 1 | hold | 187 |
+| 2 | sweep | 305 |
+| 3 | flick | 152 |
 
-## 模型资源
+图片可解码，图片/标签一一对应，标签数值检查通过，没有完全相同的图片。尚未完成逐图语义复核，也没有原始录像/歌曲分组信息；这些检查不等于独立测试集已经建立。
 
-模型文件会放在：
+## 权重与基线
 
-```text
-app/src/main/assets/model_ncnn_model/model.ncnn.param
-app/src/main/assets/model_ncnn_model/model.ncnn.bin
-```
+上传的 .pt 来自旧 model_640.pt，已在本地用 Ultralytics 成功加载：YOLOv8n、四类音符、3,011,628 个参数、训练输入 640。它是去除优化器的训练后权重，适合初始化新的微调任务，不能直接恢复旧训练进度。
 
-## 运行
+旧目录中的 best.pt、last.pt 实际识别 confirm_button/play_button，未作为音符模型上传。
 
-1. 用 Android Studio 打开 `android_native`
-2. 安装 SDK / NDK / CMake
-3. 放入 NCNN SDK
-4. Build APK
-5. 安装到已 root 手机
-6. 打开 App，点“开始录屏”
-7. 授权 root 和录屏
-8. 切回游戏
+.pt 的检查点日期为 2026-06-27，原版 NCNN 元数据的导出日期为 2026-06-25；目前未验证二者数值等价。INT8 的校准记录及源检查点也未找到。应分别测量基线，不要把其中一个的成绩替代另一个。
 
-第一版 root 触控使用常驻 `su -c "cat > /dev/input/eventX"`，App 直接写 Linux `input_event` 二进制事件流。它已经避开 ADB 和逐条 `sendevent` 命令；如果实测仍然不够快，下一步再把触摸层换成 root native daemon。
+| 基线 | 权重文件 | 权重字节数 |
+| --- | --- | --- |
+| 原版 NCNN | baselines/original_ncnn/model.ncnn.bin | 12,126,768 |
+| 已有 INT8 | baselines/int8_ncnn/model.int8.bin | 3,447,972 |
+
+模型文件总大小还应加上对应 .param。更轻量的结论必须与已有 INT8 版本比较，不能只与原版浮点模型比较。
+
+## 仓库整理范围
+
+本次移除了当前目录树中的安卓应用、构建工具、SDK 和与音符训练无关的代码，只保留训练素材、权重和必要说明。旧代码保留在 Git 历史中；整理前的远端 main 提交为 27520c86d5e05b789850d53400cd4bc94e2b017f。
+
+本次准备和上传数据，没有执行新模型训练，也没有产生新模型精度或安卓性能结论。

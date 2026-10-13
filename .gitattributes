@@ -1,8 +1,7 @@
-* text=auto
-*.bat text eol=crlf
-*.ps1 text eol=crlf
-gradlew text eol=lf
+* text=auto eol=lf
+# Preserve supplied asset bytes so MANIFEST.json also verifies on Linux.
+data/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+baselines/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 *.png binary
+*.pt binary
 *.bin binary
-*.a binary
-*.jar binary

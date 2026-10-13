@@ -1,0 +1,4 @@
+tap
+hold
+sweep
+flick

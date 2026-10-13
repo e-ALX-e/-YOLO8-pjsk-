@@ -1,31 +1,12 @@
-.gradle/
-build/
-local.properties
-
-app/build/
-.idea/
-*.iml
-
-# Generated packages and local diagnostics
-*.apk
-*.ap_
-*.aab
-screen_now*.png
-window.xml
-note-screen*.png
-note-after-tap.png
-
-# Native/Gradle intermediate files
-.cxx/
-captures/
-
-# Local YOLO training environment and outputs
-.venv-yolo/
+.venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+*.cache
+.env
+.env.*
 runs/
-datasets/
-yolo*.pt
-yolov*.pt
-
-#制谱器
-制谱器/
-tools/sus_json/
+artifacts/
+reports/
+exports/
+checkpoints/
